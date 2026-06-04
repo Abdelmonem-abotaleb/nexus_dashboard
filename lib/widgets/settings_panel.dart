@@ -413,16 +413,11 @@ class _SettingsPanelState extends State<SettingsPanel>
                       (id) => _WidgetControlRow(
                         label: _widgetLabel(id),
                         enabled: dashboard.isWidgetEnabled(id),
-                        sizeLabel: dashboard.widgetSize(id).toUpperCase(),
                         canMoveUp: dashboard.widgetOrder.indexOf(id) > 0,
                         canMoveDown:
                             dashboard.widgetOrder.indexOf(id) <
                             dashboard.widgetOrder.length - 1,
                         onToggle: (v) => dashboard.setWidgetEnabled(id, v),
-                        onResize: () => dashboard.setWidgetSize(
-                          id,
-                          _nextWidgetSize(dashboard.widgetSize(id)),
-                        ),
                         onMoveUp: () {
                           final index = dashboard.widgetOrder.indexOf(id);
                           dashboard.reorderDashboardWidget(index, index - 1);
@@ -558,19 +553,12 @@ class _SettingsPanelState extends State<SettingsPanel>
         return 'Websites';
       case 'todos':
         return 'To-Do';
+      case 'shutdown':
+        return 'Shut Down';
+      case 'restart':
+        return 'Restart';
       default:
         return id;
-    }
-  }
-
-  String _nextWidgetSize(String current) {
-    switch (current) {
-      case 'compact':
-        return 'normal';
-      case 'normal':
-        return 'large';
-      default:
-        return 'compact';
     }
   }
 
@@ -866,22 +854,18 @@ class _SettingsSlider extends StatelessWidget {
 class _WidgetControlRow extends StatelessWidget {
   final String label;
   final bool enabled;
-  final String sizeLabel;
   final bool canMoveUp;
   final bool canMoveDown;
   final ValueChanged<bool> onToggle;
-  final VoidCallback onResize;
   final VoidCallback onMoveUp;
   final VoidCallback onMoveDown;
 
   const _WidgetControlRow({
     required this.label,
     required this.enabled,
-    required this.sizeLabel,
     required this.canMoveUp,
     required this.canMoveDown,
     required this.onToggle,
-    required this.onResize,
     required this.onMoveUp,
     required this.onMoveDown,
   });
@@ -907,13 +891,6 @@ class _WidgetControlRow extends StatelessWidget {
             child: Text(
               label,
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-            ),
-          ),
-          TextButton(
-            onPressed: onResize,
-            child: Text(
-              sizeLabel,
-              style: TextStyle(color: AppTheme.neonBlue, fontSize: 10),
             ),
           ),
           Switch(

@@ -102,6 +102,37 @@ void main() {
     expect(prefs.getStringList('disabledWidgets'), contains('weather'));
   });
 
+  test('persists snapped widget layouts', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    await provider.setWidgetLayout(
+      'apps',
+      const DashboardWidgetLayout(x: 2, y: 4, width: 5, height: 3),
+    );
+
+    expect(provider.widgetLayout('apps').x, 2);
+    expect(provider.widgetLayout('apps').y, 4);
+    expect(provider.widgetLayout('apps').width, 5);
+    expect(provider.widgetLayout('apps').height, 3);
+
+    final reloaded = DashboardProvider(prefs);
+    expect(reloaded.widgetLayout('apps').x, 2);
+    expect(reloaded.widgetLayout('apps').y, 4);
+    expect(reloaded.widgetLayout('apps').width, 5);
+    expect(reloaded.widgetLayout('apps').height, 3);
+  });
+
+  test('includes power action widgets by default', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    expect(provider.visibleWidgetOrder, contains('shutdown'));
+    expect(provider.visibleWidgetOrder, contains('restart'));
+    expect(provider.widgetLayout('shutdown').width, greaterThan(0));
+    expect(provider.widgetLayout('restart').height, greaterThan(0));
+  });
+
   test('reorders websites', () async {
     final prefs = await SharedPreferences.getInstance();
     final provider = DashboardProvider(prefs);

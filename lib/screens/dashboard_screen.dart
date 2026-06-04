@@ -6,8 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../models/models.dart';
 import '../providers/dashboard_provider.dart';
 import '../providers/weather_provider.dart';
+import '../services/dashboard_grid_service.dart';
+import '../services/power_service.dart';
 import '../services/tray_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/clock_widget.dart';
@@ -18,6 +21,7 @@ import '../widgets/todo_widget.dart';
 import '../widgets/system_stats_widget.dart';
 import '../widgets/settings_panel.dart';
 import '../widgets/particle_background.dart';
+import '../widgets/power_action_widget.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,6 +32,9 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin, WindowListener {
+  static const double _gridGap = 16;
+  static const double _gridCellHeight = 112;
+
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   final FocusNode _focusNode = FocusNode();
@@ -446,74 +453,330 @@ class _DashboardScreenState extends State<DashboardScreen>
     DashboardProvider dashboard,
     Size size,
   ) {
-    final availableWidth = size.width - 48;
-    final compact = availableWidth < 1180;
-
-    return SingleChildScrollView(
-      child: Wrap(
-        spacing: 20,
-        runSpacing: 16,
-        crossAxisAlignment: WrapCrossAlignment.start,
-        children: dashboard.visibleWidgetOrder
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = _gridColumnCount(constraints.maxWidth);
+        final cellWidth =
+            (constraints.maxWidth - (_gridGap * (columns - 1))) / columns;
+        final widgets = dashboard.visibleWidgetOrder
             .map(
-              (id) => _buildDashboardWidget(
-                id,
-                compact,
-                availableWidth,
-                dashboard.widgetSize(id),
+              (id) => (
+                id: id,
+                layout: _layoutForGrid(dashboard.widgetLayout(id), columns),
+                child: _buildDashboardWidget(id),
               ),
             )
-            .whereType<Widget>()
-            .toList(),
+            .where((entry) => entry.child != null)
+            .toList();
+        final gridHeight = widgets.fold<double>(constraints.maxHeight, (
+          height,
+          entry,
+        ) {
+          final bottom =
+              entry.layout.y * (_gridCellHeight + _gridGap) +
+              entry.layout.height * _gridCellHeight +
+              (entry.layout.height - 1) * _gridGap;
+          return bottom > height ? bottom : height;
+        });
+
+        return SingleChildScrollView(
+          child: SizedBox(
+            height: gridHeight,
+            child: Stack(
+              children: widgets.map((entry) {
+                final layout = entry.layout;
+                final left = layout.x * (cellWidth + _gridGap);
+                final top = layout.y * (_gridCellHeight + _gridGap);
+                final width =
+                    layout.width * cellWidth + (layout.width - 1) * _gridGap;
+                final height =
+                    layout.height * _gridCellHeight +
+                    (layout.height - 1) * _gridGap;
+
+                return Positioned(
+                  left: left,
+                  top: top,
+                  width: width,
+                  height: height,
+                  child: _EditableDashboardWidget(
+                    id: entry.id,
+                    layout: layout,
+                    columns: columns,
+                    cellWidth: cellWidth,
+                    cellHeight: _gridCellHeight,
+                    gap: _gridGap,
+                    editMode: dashboard.isEditMode,
+                    onLayoutChanged: (updated) =>
+                        dashboard.setWidgetLayout(entry.id, updated),
+                    child: entry.child!,
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  int _gridColumnCount(double width) {
+    if (width < 520) return 2;
+    if (width < 860) return 4;
+    if (width < 1180) return 6;
+    return 12;
+  }
+
+  DashboardWidgetLayout _layoutForGrid(
+    DashboardWidgetLayout layout,
+    int columns,
+  ) {
+    final width = layout.width.clamp(1, columns);
+    return layout.copyWith(
+      x: layout.x.clamp(0, columns - width),
+      width: width,
+      y: layout.y.clamp(0, 60),
+      height: layout.height.clamp(1, 12),
+    );
+  }
+
+  Widget? _buildDashboardWidget(String id) {
+    switch (id) {
+      case 'clock':
+        return const ClockWidget();
+      case 'weather':
+        return const WeatherWidget();
+      case 'system':
+        return const SystemStatsWidget();
+      case 'apps':
+        return const AppLauncherWidget();
+      case 'websites':
+        return const WebsiteWidget();
+      case 'todos':
+        return const TodoWidget();
+      case 'shutdown':
+        return const PowerActionWidget(action: PowerAction.shutdown);
+      case 'restart':
+        return const PowerActionWidget(action: PowerAction.restart);
+      default:
+        return null;
+    }
+  }
+}
+
+class _EditableDashboardWidget extends StatefulWidget {
+  final String id;
+  final DashboardWidgetLayout layout;
+  final int columns;
+  final double cellWidth;
+  final double cellHeight;
+  final double gap;
+  final bool editMode;
+  final ValueChanged<DashboardWidgetLayout> onLayoutChanged;
+  final Widget child;
+
+  const _EditableDashboardWidget({
+    required this.id,
+    required this.layout,
+    required this.columns,
+    required this.cellWidth,
+    required this.cellHeight,
+    required this.gap,
+    required this.editMode,
+    required this.onLayoutChanged,
+    required this.child,
+  });
+
+  @override
+  State<_EditableDashboardWidget> createState() =>
+      _EditableDashboardWidgetState();
+}
+
+class _EditableDashboardWidgetState extends State<_EditableDashboardWidget> {
+  Offset _dragOffset = Offset.zero;
+  Offset _resizeOffset = Offset.zero;
+
+  @override
+  void didUpdateWidget(_EditableDashboardWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.layout != widget.layout) {
+      _dragOffset = Offset.zero;
+      _resizeOffset = Offset.zero;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: _dragOffset,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final previewWidth = clampPreviewDelta(
+            constraints.maxWidth + _resizeOffset.dx,
+            widget.cellWidth,
+            constraints.maxWidth +
+                (widget.columns * (widget.cellWidth + widget.gap)),
+          );
+          final previewHeight = clampPreviewDelta(
+            constraints.maxHeight + _resizeOffset.dy,
+            widget.cellHeight,
+            constraints.maxHeight + (12 * (widget.cellHeight + widget.gap)),
+          );
+
+          return OverflowBox(
+            alignment: Alignment.topLeft,
+            minWidth: 0,
+            minHeight: 0,
+            maxWidth: double.infinity,
+            maxHeight: double.infinity,
+            child: SizedBox(
+              width: previewWidth,
+              height: previewHeight,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned.fill(child: widget.child),
+                  if (widget.editMode) ...[
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: AppTheme.neonBlue.withValues(alpha: 0.55),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: _EditHandle(
+                        icon: Icons.open_with_rounded,
+                        tooltip: 'Move',
+                        cursor: SystemMouseCursors.move,
+                        onPanUpdate: (details) =>
+                            setState(() => _dragOffset += details.delta),
+                        onPanEnd: (_) => _commitDrag(),
+                      ),
+                    ),
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: _EditHandle(
+                        icon: Icons.aspect_ratio_rounded,
+                        tooltip: 'Resize',
+                        cursor: SystemMouseCursors.resizeDownRight,
+                        onPanUpdate: (details) =>
+                            setState(() => _resizeOffset += details.delta),
+                        onPanEnd: (_) => _commitResize(),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 
-  Widget? _buildDashboardWidget(
-    String id,
-    bool compact,
-    double width,
-    String size,
-  ) {
-    final scale = switch (size) {
-      'compact' => 0.82,
-      'large' => 1.25,
-      _ => 1.0,
-    };
-    final sideWidth = compact ? width : (300.0 * scale).clamp(240.0, 380.0);
-    final centerBase = compact ? width : (width - 640).clamp(420.0, 760.0);
-    final centerWidth = compact
-        ? width
-        : (centerBase * scale).clamp(360.0, width);
-    final todoWidth = compact ? width : (280.0 * scale).clamp(240.0, 360.0);
-    final todoHeight = switch (size) {
-      'compact' => 400.0,
-      'large' => 650.0,
-      _ => 520.0,
-    };
+  void _commitDrag() {
+    final deltaX = snapDragDeltaToGrid(
+      _dragOffset.dx,
+      widget.cellWidth + widget.gap,
+    );
+    final deltaY = snapDragDeltaToGrid(
+      _dragOffset.dy,
+      widget.cellHeight + widget.gap,
+    );
+    setState(() => _dragOffset = Offset.zero);
+    if (deltaX == 0 && deltaY == 0) return;
+    widget.onLayoutChanged(
+      _clampLayout(
+        widget.layout.copyWith(
+          x: widget.layout.x + deltaX,
+          y: widget.layout.y + deltaY,
+        ),
+      ),
+    );
+  }
 
-    switch (id) {
-      case 'clock':
-        return SizedBox(width: sideWidth, child: const ClockWidget());
-      case 'weather':
-        return SizedBox(width: sideWidth, child: const WeatherWidget());
-      case 'system':
-        return SizedBox(width: sideWidth, child: const SystemStatsWidget());
-      case 'apps':
-        return SizedBox(width: centerWidth, child: const AppLauncherWidget());
-      case 'websites':
-        return SizedBox(width: centerWidth, child: const WebsiteWidget());
-      case 'todos':
-        return SizedBox(
-          width: todoWidth,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: todoHeight),
-            child: const TodoWidget(),
+  void _commitResize() {
+    final deltaWidth = snapDragDeltaToGrid(
+      _resizeOffset.dx,
+      widget.cellWidth + widget.gap,
+    );
+    final deltaHeight = snapDragDeltaToGrid(
+      _resizeOffset.dy,
+      widget.cellHeight + widget.gap,
+    );
+    setState(() => _resizeOffset = Offset.zero);
+    if (deltaWidth == 0 && deltaHeight == 0) return;
+    widget.onLayoutChanged(
+      _clampLayout(
+        widget.layout.copyWith(
+          width: widget.layout.width + deltaWidth,
+          height: widget.layout.height + deltaHeight,
+        ),
+      ),
+    );
+  }
+
+  DashboardWidgetLayout _clampLayout(DashboardWidgetLayout layout) {
+    final minHeight = widget.id == 'shutdown' || widget.id == 'restart' ? 1 : 2;
+    final minWidth = widget.id == 'shutdown' || widget.id == 'restart' ? 1 : 2;
+    final width = layout.width.clamp(minWidth, widget.columns);
+    return layout.copyWith(
+      x: layout.x.clamp(0, widget.columns - width),
+      y: layout.y.clamp(0, 60),
+      width: width,
+      height: layout.height.clamp(minHeight, 12),
+    );
+  }
+}
+
+class _EditHandle extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final MouseCursor cursor;
+  final GestureDragUpdateCallback onPanUpdate;
+  final GestureDragEndCallback onPanEnd;
+
+  const _EditHandle({
+    required this.icon,
+    required this.tooltip,
+    required this.cursor,
+    required this.onPanUpdate,
+    required this.onPanEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 250),
+      child: MouseRegion(
+        cursor: cursor,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanUpdate: onPanUpdate,
+          onPanEnd: onPanEnd,
+          child: Container(
+            width: 44,
+            height: 44,
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: AppTheme.darkCard.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.glassBorder),
+            ),
+            child: Icon(icon, color: AppTheme.neonBlue, size: 18),
           ),
-        );
-      default:
-        return null;
-    }
+        ),
+      ),
+    );
   }
 }
 

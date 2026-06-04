@@ -90,6 +90,43 @@ void main() {
     expect(forecastUri.queryParameters['units'], 'metric');
   });
 
+  test('uses default coordinates for OpenWeather when no location is set', () async {
+    final requestedUris = <Uri>[];
+    final provider = WeatherProvider(
+      httpGet: (uri) async {
+        requestedUris.add(uri);
+        if (uri.path == '/data/2.5/weather') {
+          return http.Response(
+            '{"name":"Cairo","coord":{"lat":30.06263,"lon":31.24967},"main":{"temp":26.0,"humidity":48,"feels_like":27.0},"wind":{"speed":3.2},"weather":[{"description":"clear sky","icon":"01d"}]}',
+            200,
+          );
+        }
+        return http.Response(
+          '{"list":['
+          '{"dt":1780502400,"dt_txt":"2026-06-03 12:00:00","main":{"temp_min":24.0,"temp_max":33.0},"weather":[{"description":"clear sky","icon":"01d"}]},'
+          '{"dt":1780588800,"dt_txt":"2026-06-04 12:00:00","main":{"temp_min":23.0,"temp_max":31.0},"weather":[{"description":"light rain","icon":"10d"}]}'
+          '],"city":{"timezone":7200}}',
+          200,
+        );
+      },
+    );
+
+    await provider.fetchWeather(apiKey: 'key');
+
+    expect(provider.weatherData?.city, 'Cairo');
+    expect(provider.weatherData?.temperature, 26);
+    expect(provider.weatherData?.forecast, hasLength(2));
+    expect(provider.isDemoData, isFalse);
+    expect(provider.error, isEmpty);
+
+    final currentUri = requestedUris.first;
+    expect(currentUri.path, '/data/2.5/weather');
+    expect(currentUri.queryParameters['lat'], '30.06263');
+    expect(currentUri.queryParameters['lon'], '31.24967');
+    expect(currentUri.queryParameters['appid'], 'key');
+    expect(currentUri.queryParameters['units'], 'metric');
+  });
+
   test('keeps OpenWeather current data when forecast fetch fails', () async {
     final provider = WeatherProvider(
       httpGet: (uri) async {

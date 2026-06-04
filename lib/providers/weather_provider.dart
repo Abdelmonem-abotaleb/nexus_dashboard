@@ -41,23 +41,32 @@ class WeatherProvider extends ChangeNotifier {
     }
 
     try {
-      String url;
       final units = useMetricUnits ? 'metric' : 'imperial';
-      if (city != null && city.isNotEmpty) {
-        url =
-            'https://api.openweathermap.org/data/2.5/weather?q=$city&appid=$apiKey&units=$units';
+      final resolvedCity = city?.trim();
+      Uri uri;
+      if (resolvedCity != null && resolvedCity.isNotEmpty) {
+        uri = Uri.https('api.openweathermap.org', '/data/2.5/weather', {
+          'q': resolvedCity,
+          'appid': apiKey,
+          'units': units,
+        });
       } else if (lat != null && lon != null) {
-        url =
-            'https://api.openweathermap.org/data/2.5/weather?lat=$lat&lon=$lon&appid=$apiKey&units=$units';
+        uri = Uri.https('api.openweathermap.org', '/data/2.5/weather', {
+          'lat': lat.toString(),
+          'lon': lon.toString(),
+          'appid': apiKey,
+          'units': units,
+        });
       } else {
-        _weatherData = WeatherData.mock();
-        _isDemoData = true;
-        _isLoading = false;
-        notifyListeners();
-        return;
+        uri = Uri.https('api.openweathermap.org', '/data/2.5/weather', {
+          'lat': '30.06263',
+          'lon': '31.24967',
+          'appid': apiKey,
+          'units': units,
+        });
       }
 
-      final response = await _httpGet(Uri.parse(url));
+      final response = await _httpGet(uri);
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         final forecast = await _fetchOpenWeatherForecast(

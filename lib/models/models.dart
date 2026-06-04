@@ -107,6 +107,46 @@ class TodoItem {
   );
 }
 
+// ─── Dashboard Widget Layout Model ───────────────────────────────────────────
+class DashboardWidgetLayout {
+  final int x;
+  final int y;
+  final int width;
+  final int height;
+
+  const DashboardWidgetLayout({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  DashboardWidgetLayout copyWith({int? x, int? y, int? width, int? height}) {
+    return DashboardWidgetLayout(
+      x: x ?? this.x,
+      y: y ?? this.y,
+      width: width ?? this.width,
+      height: height ?? this.height,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'x': x,
+    'y': y,
+    'width': width,
+    'height': height,
+  };
+
+  factory DashboardWidgetLayout.fromJson(Map<String, dynamic> json) {
+    return DashboardWidgetLayout(
+      x: (json['x'] as num?)?.toInt() ?? 0,
+      y: (json['y'] as num?)?.toInt() ?? 0,
+      width: (json['width'] as num?)?.toInt() ?? 2,
+      height: (json['height'] as num?)?.toInt() ?? 2,
+    );
+  }
+}
+
 // ─── Weather Model ───────────────────────────────────────────────────────────
 class ForecastDay {
   final DateTime date;

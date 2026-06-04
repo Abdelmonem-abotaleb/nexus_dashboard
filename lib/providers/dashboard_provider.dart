@@ -33,10 +33,23 @@ class DashboardProvider extends ChangeNotifier {
     'clock',
     'weather',
     'system',
+    'todos',
     'apps',
     'websites',
-    'todos',
+    'shutdown',
+    'restart',
   ];
+
+  static const Map<String, DashboardWidgetLayout> defaultWidgetLayouts = {
+    'clock': DashboardWidgetLayout(x: 0, y: 0, width: 3, height: 2),
+    'weather': DashboardWidgetLayout(x: 3, y: 0, width: 3, height: 3),
+    'system': DashboardWidgetLayout(x: 6, y: 0, width: 3, height: 3),
+    'todos': DashboardWidgetLayout(x: 9, y: 0, width: 3, height: 3),
+    'apps': DashboardWidgetLayout(x: 0, y: 3, width: 7, height: 3),
+    'websites': DashboardWidgetLayout(x: 0, y: 6, width: 7, height: 2),
+    'shutdown': DashboardWidgetLayout(x: 7, y: 3, width: 2, height: 1),
+    'restart': DashboardWidgetLayout(x: 9, y: 3, width: 2, height: 1),
+  };
 
   final SharedPreferences _prefs;
 
@@ -68,6 +81,9 @@ class DashboardProvider extends ChangeNotifier {
   List<String> _widgetOrder = List.of(defaultWidgetOrder);
   Set<String> _disabledWidgetIds = {};
   Map<String, String> _widgetSizes = {};
+  Map<String, DashboardWidgetLayout> _widgetLayouts = Map.of(
+    defaultWidgetLayouts,
+  );
   bool _weatherMetricUnits = true;
   int _weatherRefreshMinutes = 15;
 
@@ -165,6 +181,9 @@ class DashboardProvider extends ChangeNotifier {
       _prefs.getStringList('widgetOrder') ?? defaultWidgetOrder,
     );
     _widgetSizes = _loadWidgetSizes(_prefs.getStringList('widgetSizes') ?? []);
+    _widgetLayouts = _loadWidgetLayouts(
+      _prefs.getStringList('widgetLayouts') ?? [],
+    );
     _weatherMetricUnits = _prefs.getBool('weatherMetricUnits') ?? true;
     _weatherRefreshMinutes = _prefs.getInt('weatherRefreshMinutes') ?? 15;
 
@@ -222,6 +241,33 @@ class DashboardProvider extends ChangeNotifier {
     return sizes;
   }
 
+  Map<String, DashboardWidgetLayout> _loadWidgetLayouts(List<String> entries) {
+    final layouts = Map<String, DashboardWidgetLayout>.of(defaultWidgetLayouts);
+    for (final entry in entries) {
+      try {
+        final decoded = jsonDecode(entry);
+        if (decoded is! Map<String, dynamic>) continue;
+        final id = decoded['id'] as String?;
+        if (id == null || !defaultWidgetOrder.contains(id)) continue;
+        layouts[id] = _sanitizeWidgetLayout(
+          DashboardWidgetLayout.fromJson(decoded),
+        );
+      } catch (_) {
+        continue;
+      }
+    }
+    return layouts;
+  }
+
+  DashboardWidgetLayout _sanitizeWidgetLayout(DashboardWidgetLayout layout) {
+    return DashboardWidgetLayout(
+      x: layout.x.clamp(0, 11),
+      y: layout.y.clamp(0, 60),
+      width: layout.width.clamp(1, 12),
+      height: layout.height.clamp(1, 12),
+    );
+  }
+
   ThemeModePreference _loadThemeModePreference() {
     final savedPreference = _prefs.getString('themeModePreference');
     if (savedPreference != null) {
@@ -237,6 +283,17 @@ class DashboardProvider extends ChangeNotifier {
     await _prefs.setStringList(
       'widgetSizes',
       _widgetSizes.entries.map((e) => '${e.key}:${e.value}').toList(),
+    );
+  }
+
+  Future<void> _saveWidgetLayouts() async {
+    await _prefs.setStringList(
+      'widgetLayouts',
+      _widgetLayouts.entries
+          .map(
+            (entry) => jsonEncode({'id': entry.key, ...entry.value.toJson()}),
+          )
+          .toList(),
     );
   }
 
@@ -576,6 +633,17 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   String widgetSize(String id) => _widgetSizes[id] ?? 'normal';
+
+  DashboardWidgetLayout widgetLayout(String id) {
+    return _widgetLayouts[id] ?? defaultWidgetLayouts[id]!;
+  }
+
+  Future<void> setWidgetLayout(String id, DashboardWidgetLayout layout) async {
+    if (!defaultWidgetOrder.contains(id)) return;
+    _widgetLayouts[id] = _sanitizeWidgetLayout(layout);
+    await _saveWidgetLayouts();
+    notifyListeners();
+  }
 
   Future<void> setWidgetSize(String id, String size) async {
     if (!defaultWidgetOrder.contains(id)) return;
