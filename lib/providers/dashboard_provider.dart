@@ -1,0 +1,614 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/models.dart';
+import '../services/app_icon_service.dart';
+
+enum ThemeModePreference {
+  system,
+  light,
+  dark;
+
+  static ThemeModePreference fromString(String? value) {
+    return switch (value) {
+      'system' => ThemeModePreference.system,
+      'light' => ThemeModePreference.light,
+      'dark' => ThemeModePreference.dark,
+      _ => ThemeModePreference.dark,
+    };
+  }
+
+  bool resolveUseDarkMode({required bool platformDarkMode}) {
+    return switch (this) {
+      ThemeModePreference.system => platformDarkMode,
+      ThemeModePreference.light => false,
+      ThemeModePreference.dark => true,
+    };
+  }
+}
+
+class DashboardProvider extends ChangeNotifier {
+  static const defaultWidgetOrder = [
+    'clock',
+    'weather',
+    'system',
+    'apps',
+    'websites',
+    'todos',
+  ];
+
+  final SharedPreferences _prefs;
+
+  List<AppShortcut> _apps = [];
+  List<WebShortcut> _websites = [];
+  List<TodoItem> _todos = [];
+
+  String _backgroundImagePath = '';
+  String _userName = 'Abdo';
+  String _accentColor = '#00D4FF';
+  bool _showSeconds = true;
+  bool _use24Hour = true;
+  ThemeModePreference _themeModePreference = ThemeModePreference.dark;
+  String _weatherApiKey = '';
+  String _weatherCity = '';
+  bool _isEditMode = false;
+  bool _takeoverMode = false;
+  bool _fullscreenEnabled = false;
+  bool _borderlessEnabled = false;
+  bool _alwaysOnTop = false;
+  bool _hideFromTaskbar = false;
+  bool _protectWindowControls = false;
+  bool _wakeFocusFallback = true;
+  int _startupDelaySeconds = 2;
+  double _windowOpacity = 1.0;
+  double _backgroundDim = 0.7;
+  double _blurStrength = 4.0;
+  double _glassIntensity = 1.0;
+  List<String> _widgetOrder = List.of(defaultWidgetOrder);
+  Set<String> _disabledWidgetIds = {};
+  Map<String, String> _widgetSizes = {};
+  bool _weatherMetricUnits = true;
+  int _weatherRefreshMinutes = 15;
+
+  DashboardProvider(this._prefs) {
+    _loadData();
+  }
+
+  // ─── Getters ─────────────────────────────────────────────────────────────
+  List<AppShortcut> get apps => _apps;
+  List<WebShortcut> get websites => _websites;
+  List<TodoItem> get todos => _todos;
+  String get backgroundImagePath => _backgroundImagePath;
+  String get userName => _userName;
+  String get accentColor => _accentColor;
+  bool get showSeconds => _showSeconds;
+  bool get use24Hour => _use24Hour;
+  ThemeModePreference get themeModePreference => _themeModePreference;
+  bool get useDarkMode => _themeModePreference == ThemeModePreference.dark;
+  String get weatherApiKey => _weatherApiKey;
+  String get weatherCity => _weatherCity;
+  bool get isEditMode => _isEditMode;
+  bool get takeoverMode => _takeoverMode;
+  bool get fullscreenEnabled => _fullscreenEnabled;
+  bool get borderlessEnabled => _borderlessEnabled;
+  bool get alwaysOnTop => _alwaysOnTop;
+  bool get hideFromTaskbar => _hideFromTaskbar;
+  bool get protectWindowControls => _protectWindowControls;
+  bool get wakeFocusFallback => _wakeFocusFallback;
+  int get startupDelaySeconds => _startupDelaySeconds;
+  double get windowOpacity => _windowOpacity;
+  double get backgroundDim => _backgroundDim;
+  double get blurStrength => _blurStrength;
+  double get glassIntensity => _glassIntensity;
+  List<String> get widgetOrder => List.unmodifiable(_widgetOrder);
+  bool get weatherMetricUnits => _weatherMetricUnits;
+  int get weatherRefreshMinutes => _weatherRefreshMinutes;
+
+  Color get accentColorValue {
+    try {
+      return Color(int.parse(_accentColor.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return const Color(0xFF00D4FF);
+    }
+  }
+
+  List<TodoItem> get pendingTodos => _todos.where((t) => !t.completed).toList();
+  List<TodoItem> get completedTodos =>
+      _todos.where((t) => t.completed).toList();
+  List<String> get visibleWidgetOrder =>
+      _widgetOrder.where(isWidgetEnabled).toList();
+
+  // ─── Load / Save ──────────────────────────────────────────────────────────
+  void _loadData() {
+    // Load apps
+    final appsJson = _prefs.getStringList('apps') ?? [];
+    _apps = appsJson.map((s) => AppShortcut.fromJson(jsonDecode(s))).toList();
+
+    // Load websites
+    final websitesJson = _prefs.getStringList('websites') ?? [];
+    _websites = websitesJson
+        .map((s) => WebShortcut.fromJson(jsonDecode(s)))
+        .toList();
+
+    // Load todos
+    final todosJson = _prefs.getStringList('todos') ?? [];
+    _todos = todosJson.map((s) => TodoItem.fromJson(jsonDecode(s))).toList();
+
+    // Load settings
+    _backgroundImagePath = _prefs.getString('backgroundImage') ?? '';
+    final savedUserName = _prefs.getString('userName');
+    _userName = savedUserName == null || savedUserName == 'User'
+        ? 'Abdo'
+        : savedUserName;
+    _accentColor = _prefs.getString('accentColor') ?? '#00D4FF';
+    _showSeconds = _prefs.getBool('showSeconds') ?? true;
+    _use24Hour = _prefs.getBool('use24Hour') ?? true;
+    _themeModePreference = _loadThemeModePreference();
+    _weatherApiKey = _prefs.getString('weatherApiKey') ?? '';
+    _weatherCity = _prefs.getString('weatherCity') ?? '';
+    _takeoverMode = _prefs.getBool('takeoverMode') ?? false;
+    _fullscreenEnabled = _prefs.getBool('fullscreenEnabled') ?? false;
+    _borderlessEnabled = _prefs.getBool('borderlessEnabled') ?? false;
+    _alwaysOnTop = _prefs.getBool('alwaysOnTop') ?? false;
+    _hideFromTaskbar = _prefs.getBool('hideFromTaskbar') ?? false;
+    _protectWindowControls = _prefs.getBool('protectWindowControls') ?? false;
+    _wakeFocusFallback = _prefs.getBool('wakeFocusFallback') ?? true;
+    _startupDelaySeconds = _prefs.getInt('startupDelaySeconds') ?? 2;
+    _windowOpacity = _prefs.getDouble('windowOpacity') ?? 1.0;
+    _backgroundDim = _prefs.getDouble('backgroundDim') ?? 0.7;
+    _blurStrength = _prefs.getDouble('blurStrength') ?? 4.0;
+    _glassIntensity = _prefs.getDouble('glassIntensity') ?? 1.0;
+    _disabledWidgetIds = (_prefs.getStringList('disabledWidgets') ?? [])
+        .toSet();
+    _widgetOrder = _normalizeWidgetOrder(
+      _prefs.getStringList('widgetOrder') ?? defaultWidgetOrder,
+    );
+    _widgetSizes = _loadWidgetSizes(_prefs.getStringList('widgetSizes') ?? []);
+    _weatherMetricUnits = _prefs.getBool('weatherMetricUnits') ?? true;
+    _weatherRefreshMinutes = _prefs.getInt('weatherRefreshMinutes') ?? 15;
+
+    // Add demo data if first launch
+    if (_apps.isEmpty) _loadDemoApps();
+    if (_websites.isEmpty) _loadDemoWebsites();
+    _hydrateMissingAppIcons();
+
+    notifyListeners();
+  }
+
+  Future<void> _saveApps() async {
+    await _prefs.setStringList(
+      'apps',
+      _apps.map((a) => jsonEncode(a.toJson())).toList(),
+    );
+  }
+
+  Future<void> _saveWebsites() async {
+    await _prefs.setStringList(
+      'websites',
+      _websites.map((w) => jsonEncode(w.toJson())).toList(),
+    );
+  }
+
+  Future<void> _saveTodos() async {
+    await _prefs.setStringList(
+      'todos',
+      _todos.map((t) => jsonEncode(t.toJson())).toList(),
+    );
+  }
+
+  List<String> _normalizeWidgetOrder(List<String> order) {
+    final normalized = <String>[];
+    for (final id in order) {
+      if (defaultWidgetOrder.contains(id) && !normalized.contains(id)) {
+        normalized.add(id);
+      }
+    }
+    for (final id in defaultWidgetOrder) {
+      if (!normalized.contains(id)) normalized.add(id);
+    }
+    return normalized;
+  }
+
+  Map<String, String> _loadWidgetSizes(List<String> entries) {
+    final sizes = <String, String>{};
+    for (final entry in entries) {
+      final parts = entry.split(':');
+      if (parts.length != 2) continue;
+      if (!defaultWidgetOrder.contains(parts[0])) continue;
+      if (!['compact', 'normal', 'large'].contains(parts[1])) continue;
+      sizes[parts[0]] = parts[1];
+    }
+    return sizes;
+  }
+
+  ThemeModePreference _loadThemeModePreference() {
+    final savedPreference = _prefs.getString('themeModePreference');
+    if (savedPreference != null) {
+      return ThemeModePreference.fromString(savedPreference);
+    }
+    final legacyDarkMode = _prefs.getBool('useDarkMode') ?? true;
+    return legacyDarkMode
+        ? ThemeModePreference.dark
+        : ThemeModePreference.light;
+  }
+
+  Future<void> _saveWidgetSizes() async {
+    await _prefs.setStringList(
+      'widgetSizes',
+      _widgetSizes.entries.map((e) => '${e.key}:${e.value}').toList(),
+    );
+  }
+
+  // ─── Demo Data ────────────────────────────────────────────────────────────
+  void _loadDemoApps() {
+    _apps = [
+      AppShortcut(
+        id: '1',
+        name: 'Chrome',
+        executablePath:
+            r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+        color: '#4285F4',
+      ),
+      AppShortcut(
+        id: '2',
+        name: 'VS Code',
+        executablePath:
+            r'C:\Users\%USERNAME%\AppData\Local\Programs\Microsoft VS Code\Code.exe',
+        color: '#007ACC',
+      ),
+      AppShortcut(
+        id: '3',
+        name: 'Spotify',
+        executablePath:
+            r'C:\Users\%USERNAME%\AppData\Roaming\Spotify\Spotify.exe',
+        color: '#1DB954',
+      ),
+      AppShortcut(
+        id: '4',
+        name: 'Discord',
+        executablePath: r'C:\Users\%USERNAME%\AppData\Local\Discord\Update.exe',
+        color: '#5865F2',
+      ),
+    ];
+    _saveApps();
+  }
+
+  void _loadDemoWebsites() {
+    _websites = [
+      WebShortcut(
+        id: '1',
+        name: 'YouTube',
+        url: 'https://youtube.com',
+        color: '#FF0000',
+      ),
+      WebShortcut(
+        id: '2',
+        name: 'GitHub',
+        url: 'https://github.com',
+        color: '#6E40C9',
+      ),
+      WebShortcut(
+        id: '3',
+        name: 'Gmail',
+        url: 'https://mail.google.com',
+        color: '#EA4335',
+      ),
+      WebShortcut(
+        id: '4',
+        name: 'Reddit',
+        url: 'https://reddit.com',
+        color: '#FF4500',
+      ),
+    ];
+    _saveWebsites();
+  }
+
+  Future<void> _hydrateMissingAppIcons() async {
+    var changed = false;
+    for (final app in _apps) {
+      if (app.iconPath.isNotEmpty && File(app.iconPath).existsSync()) {
+        continue;
+      }
+      final iconPath = await extractWindowsAppIcon(
+        executablePath: app.executablePath,
+        appId: app.id,
+      );
+      if (iconPath.isEmpty) continue;
+      app.iconPath = iconPath;
+      changed = true;
+    }
+
+    if (!changed) return;
+    await _saveApps();
+    notifyListeners();
+  }
+
+  // ─── Edit Mode ────────────────────────────────────────────────────────────
+  void toggleEditMode() {
+    _isEditMode = !_isEditMode;
+    notifyListeners();
+  }
+
+  // ─── App Management ───────────────────────────────────────────────────────
+  void addApp(AppShortcut app) {
+    _apps.add(app);
+    _saveApps();
+    notifyListeners();
+  }
+
+  void updateApp(AppShortcut app) {
+    final idx = _apps.indexWhere((a) => a.id == app.id);
+    if (idx != -1) {
+      _apps[idx] = app;
+      _saveApps();
+      notifyListeners();
+    }
+  }
+
+  void removeApp(String id) {
+    _apps.removeWhere((a) => a.id == id);
+    _saveApps();
+    notifyListeners();
+  }
+
+  void reorderApps(int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex--;
+    final item = _apps.removeAt(oldIndex);
+    _apps.insert(newIndex, item);
+    _saveApps();
+    notifyListeners();
+  }
+
+  // ─── Website Management ───────────────────────────────────────────────────
+  void addWebsite(WebShortcut site) {
+    _websites.add(site);
+    _saveWebsites();
+    notifyListeners();
+  }
+
+  void updateWebsite(WebShortcut site) {
+    final idx = _websites.indexWhere((w) => w.id == site.id);
+    if (idx != -1) {
+      _websites[idx] = site;
+      _saveWebsites();
+      notifyListeners();
+    }
+  }
+
+  void removeWebsite(String id) {
+    _websites.removeWhere((w) => w.id == id);
+    _saveWebsites();
+    notifyListeners();
+  }
+
+  void reorderWebsites(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _websites.length) return;
+    if (newIndex < 0 || newIndex > _websites.length) return;
+    if (newIndex > oldIndex) newIndex--;
+    final item = _websites.removeAt(oldIndex);
+    _websites.insert(newIndex, item);
+    _saveWebsites();
+    notifyListeners();
+  }
+
+  // ─── Todo Management ──────────────────────────────────────────────────────
+  void addTodo(String text) {
+    if (text.trim().isEmpty) return;
+    _todos.insert(
+      0,
+      TodoItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        text: text.trim(),
+      ),
+    );
+    _saveTodos();
+    notifyListeners();
+  }
+
+  void toggleTodo(String id) {
+    final index = _todos.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    final todo = _todos[index];
+    todo.completed = !todo.completed;
+    _saveTodos();
+    notifyListeners();
+  }
+
+  void deleteTodo(String id) {
+    _todos.removeWhere((t) => t.id == id);
+    _saveTodos();
+    notifyListeners();
+  }
+
+  void clearCompletedTodos() {
+    _todos.removeWhere((t) => t.completed);
+    _saveTodos();
+    notifyListeners();
+  }
+
+  // ─── Settings ─────────────────────────────────────────────────────────────
+  Future<void> setBackgroundImage(String path) async {
+    _backgroundImagePath = path;
+    await _prefs.setString('backgroundImage', path);
+    notifyListeners();
+  }
+
+  Future<void> setUserName(String name) async {
+    _userName = name;
+    await _prefs.setString('userName', name);
+    notifyListeners();
+  }
+
+  Future<void> setAccentColor(String hex) async {
+    _accentColor = hex;
+    await _prefs.setString('accentColor', hex);
+    notifyListeners();
+  }
+
+  Future<void> setShowSeconds(bool value) async {
+    _showSeconds = value;
+    await _prefs.setBool('showSeconds', value);
+    notifyListeners();
+  }
+
+  Future<void> setUse24Hour(bool value) async {
+    _use24Hour = value;
+    await _prefs.setBool('use24Hour', value);
+    notifyListeners();
+  }
+
+  Future<void> setUseDarkMode(bool value) async {
+    _themeModePreference = value
+        ? ThemeModePreference.dark
+        : ThemeModePreference.light;
+    await _prefs.setBool('useDarkMode', value);
+    await _prefs.setString('themeModePreference', _themeModePreference.name);
+    notifyListeners();
+  }
+
+  Future<void> setThemeModePreference(ThemeModePreference value) async {
+    _themeModePreference = value;
+    await _prefs.setString('themeModePreference', value.name);
+    await _prefs.setBool('useDarkMode', value == ThemeModePreference.dark);
+    notifyListeners();
+  }
+
+  bool resolveUseDarkMode({required bool platformDarkMode}) {
+    return _themeModePreference.resolveUseDarkMode(
+      platformDarkMode: platformDarkMode,
+    );
+  }
+
+  Future<void> setTakeoverMode(bool value) async {
+    _takeoverMode = value;
+    await _prefs.setBool('takeoverMode', value);
+    notifyListeners();
+  }
+
+  Future<void> setFullscreenEnabled(bool value) async {
+    _fullscreenEnabled = value;
+    await _prefs.setBool('fullscreenEnabled', value);
+    notifyListeners();
+  }
+
+  Future<void> setBorderlessEnabled(bool value) async {
+    _borderlessEnabled = value;
+    await _prefs.setBool('borderlessEnabled', value);
+    notifyListeners();
+  }
+
+  Future<void> setAlwaysOnTop(bool value) async {
+    _alwaysOnTop = value;
+    await _prefs.setBool('alwaysOnTop', value);
+    notifyListeners();
+  }
+
+  Future<void> setHideFromTaskbar(bool value) async {
+    _hideFromTaskbar = value;
+    await _prefs.setBool('hideFromTaskbar', value);
+    notifyListeners();
+  }
+
+  Future<void> setProtectWindowControls(bool value) async {
+    _protectWindowControls = value;
+    await _prefs.setBool('protectWindowControls', value);
+    notifyListeners();
+  }
+
+  Future<void> setWakeFocusFallback(bool value) async {
+    _wakeFocusFallback = value;
+    await _prefs.setBool('wakeFocusFallback', value);
+    notifyListeners();
+  }
+
+  Future<void> setStartupDelaySeconds(int value) async {
+    _startupDelaySeconds = value.clamp(0, 30);
+    await _prefs.setInt('startupDelaySeconds', _startupDelaySeconds);
+    notifyListeners();
+  }
+
+  Future<void> setWindowOpacity(double value) async {
+    _windowOpacity = value.clamp(0.25, 1.0);
+    await _prefs.setDouble('windowOpacity', _windowOpacity);
+    notifyListeners();
+  }
+
+  Future<void> setBackgroundDim(double value) async {
+    _backgroundDim = value.clamp(0.0, 0.95);
+    await _prefs.setDouble('backgroundDim', _backgroundDim);
+    notifyListeners();
+  }
+
+  Future<void> setBlurStrength(double value) async {
+    _blurStrength = value.clamp(0.0, 30.0);
+    await _prefs.setDouble('blurStrength', _blurStrength);
+    notifyListeners();
+  }
+
+  Future<void> setGlassIntensity(double value) async {
+    _glassIntensity = value.clamp(0.2, 1.4);
+    await _prefs.setDouble('glassIntensity', _glassIntensity);
+    notifyListeners();
+  }
+
+  bool isWidgetEnabled(String id) => !_disabledWidgetIds.contains(id);
+
+  Future<void> setWidgetEnabled(String id, bool value) async {
+    if (!defaultWidgetOrder.contains(id)) return;
+    if (value) {
+      _disabledWidgetIds.remove(id);
+    } else {
+      _disabledWidgetIds.add(id);
+    }
+    await _prefs.setStringList('disabledWidgets', _disabledWidgetIds.toList());
+    notifyListeners();
+  }
+
+  void reorderDashboardWidget(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _widgetOrder.length) return;
+    if (newIndex < 0 || newIndex > _widgetOrder.length) return;
+    if (newIndex > oldIndex) newIndex--;
+    final item = _widgetOrder.removeAt(oldIndex);
+    _widgetOrder.insert(newIndex, item);
+    _prefs.setStringList('widgetOrder', _widgetOrder);
+    notifyListeners();
+  }
+
+  String widgetSize(String id) => _widgetSizes[id] ?? 'normal';
+
+  Future<void> setWidgetSize(String id, String size) async {
+    if (!defaultWidgetOrder.contains(id)) return;
+    if (!['compact', 'normal', 'large'].contains(size)) return;
+    _widgetSizes[id] = size;
+    await _saveWidgetSizes();
+    notifyListeners();
+  }
+
+  Future<void> setWeatherMetricUnits(bool value) async {
+    _weatherMetricUnits = value;
+    await _prefs.setBool('weatherMetricUnits', value);
+    notifyListeners();
+  }
+
+  Future<void> setWeatherRefreshMinutes(int value) async {
+    _weatherRefreshMinutes = value.clamp(1, 120);
+    await _prefs.setInt('weatherRefreshMinutes', _weatherRefreshMinutes);
+    notifyListeners();
+  }
+
+  Future<void> setWeatherApiKey(String key) async {
+    _weatherApiKey = key;
+    await _prefs.setString('weatherApiKey', key);
+    notifyListeners();
+  }
+
+  Future<void> setWeatherCity(String city) async {
+    _weatherCity = city;
+    await _prefs.setString('weatherCity', city);
+    notifyListeners();
+  }
+
+  // Generate unique ID
+  String generateId() => DateTime.now().millisecondsSinceEpoch.toString();
+}

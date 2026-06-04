@@ -1,0 +1,522 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../models/models.dart';
+import '../providers/dashboard_provider.dart';
+import '../services/app_icon_service.dart';
+import '../services/launch_window_service.dart';
+import '../theme/app_theme.dart';
+import 'add_app_dialog.dart';
+
+class AppLauncherWidget extends StatelessWidget {
+  const AppLauncherWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final dashboard = context.watch<DashboardProvider>();
+    final apps = dashboard.apps;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppTheme.glassDecoration(
+        borderRadius: 20,
+        borderColor: AppTheme.neonGreen.withValues(alpha: 0.15),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Icon(Icons.apps_rounded, color: AppTheme.neonGreen, size: 14),
+              const SizedBox(width: 8),
+              Text(
+                'APP LAUNCHER',
+                style: TextStyle(
+                  color: AppTheme.neonGreen,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 3,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => _showAddAppDialog(context, dashboard),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.neonGreen.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: AppTheme.neonGreen.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.add_rounded,
+                        color: AppTheme.neonGreen,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'ADD APP',
+                        style: TextStyle(
+                          color: AppTheme.neonGreen,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // App grid
+          apps.isEmpty
+              ? _emptyState(context, dashboard)
+              : Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: apps
+                      .asMap()
+                      .entries
+                      .map(
+                        (app) => _AppIcon(
+                          app: app.value,
+                          isEditMode: dashboard.isEditMode,
+                          onLaunch: () => _launchApp(context, app.value),
+                          onDelete: () =>
+                              _confirmDeleteApp(context, dashboard, app.value),
+                          onEdit: () =>
+                              _showEditAppDialog(context, dashboard, app.value),
+                          onMoveUp: app.key > 0
+                              ? () =>
+                                    dashboard.reorderApps(app.key, app.key - 1)
+                              : null,
+                          onMoveDown: app.key < apps.length - 1
+                              ? () =>
+                                    dashboard.reorderApps(app.key, app.key + 2)
+                              : null,
+                        ),
+                      )
+                      .toList(),
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyState(BuildContext context, DashboardProvider dashboard) {
+    return GestureDetector(
+      onTap: () => _showAddAppDialog(context, dashboard),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        decoration: BoxDecoration(
+          border: Border.all(color: AppTheme.glassBorder, width: 1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.add_circle_outline, color: AppTheme.textMuted, size: 32),
+            const SizedBox(height: 8),
+            Text(
+              'Add your first app',
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _launchApp(BuildContext context, AppShortcut app) async {
+    var launched = false;
+    Object? launchError;
+    LaunchWindowPolicy? launchPolicy;
+    try {
+      final dashboard = context.read<DashboardProvider>();
+      final path = app.executablePath.replaceAll(
+        '%USERNAME%',
+        Platform.environment['USERNAME'] ?? '',
+      );
+
+      launchPolicy = LaunchWindowPolicy.fromDashboard(dashboard);
+      await prepareWindowForExternalLaunch(launchPolicy);
+
+      if (_isUwpOrProtocol(path)) {
+        String launchTarget = path;
+        if (!path.startsWith('shell:') && !path.contains(':')) {
+          launchTarget = 'shell:AppsFolder\\$path';
+        }
+        final process = await Process.start('cmd', [
+          '/c',
+          'start',
+          '',
+          launchTarget,
+        ], runInShell: true);
+        final exitCode = await process.exitCode;
+        if (exitCode != 0) {
+          throw Exception('Shell command failed with exit code $exitCode');
+        }
+        launched = true;
+      } else {
+        if (!File(path).existsSync()) {
+          throw Exception('File does not exist: $path');
+        }
+        await Process.start(path, [], runInShell: true);
+        launched = true;
+      }
+    } catch (e) {
+      launchError = e;
+    } finally {
+      if (launchError == null && launched) {
+        await finishSuccessfulExternalLaunch(launchPolicy!);
+      } else if (launchPolicy != null) {
+        await restoreWindowAfterFailedExternalLaunch(launchPolicy);
+      }
+    }
+
+    if (launchError != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not launch ${app.name}: ${launchError.toString()}',
+          ),
+          backgroundColor: AppTheme.neonPink,
+        ),
+      );
+    }
+  }
+
+  void _showAddAppDialog(BuildContext context, DashboardProvider dashboard) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (_) => AddAppDialog(
+        onSave: (app) => dashboard.addApp(app),
+        generateId: dashboard.generateId,
+      ),
+    );
+  }
+
+  void _showEditAppDialog(
+    BuildContext context,
+    DashboardProvider dashboard,
+    AppShortcut app,
+  ) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (_) => AddAppDialog(
+        existingApp: app,
+        onSave: (updated) => dashboard.updateApp(updated),
+        generateId: dashboard.generateId,
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteApp(
+    BuildContext context,
+    DashboardProvider dashboard,
+    AppShortcut app,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (_) => _DeleteConfirmDialog(
+        title: 'REMOVE APP',
+        message: 'Remove ${app.name} from the launcher?',
+        accentColor: AppTheme.neonGreen,
+      ),
+    );
+    if (confirmed == true) {
+      dashboard.removeApp(app.id);
+    }
+  }
+}
+
+// ─── App Icon ─────────────────────────────────────────────────────────────────
+class _AppIcon extends StatefulWidget {
+  final AppShortcut app;
+  final bool isEditMode;
+  final VoidCallback onLaunch;
+  final VoidCallback onDelete;
+  final VoidCallback onEdit;
+  final VoidCallback? onMoveUp;
+  final VoidCallback? onMoveDown;
+
+  const _AppIcon({
+    required this.app,
+    required this.isEditMode,
+    required this.onLaunch,
+    required this.onDelete,
+    required this.onEdit,
+    required this.onMoveUp,
+    required this.onMoveDown,
+  });
+
+  @override
+  State<_AppIcon> createState() => _AppIconState();
+}
+
+class _AppIconState extends State<_AppIcon>
+    with SingleTickerProviderStateMixin {
+  bool _hovered = false;
+  late AnimationController _scaleController;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _scaleAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.08,
+    ).animate(CurvedAnimation(parent: _scaleController, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _scaleController.dispose();
+    super.dispose();
+  }
+
+  String get _resolvedPath => widget.app.executablePath.replaceAll(
+    '%USERNAME%',
+    Platform.environment['USERNAME'] ?? '',
+  );
+
+  bool get _pathExists {
+    final path = _resolvedPath;
+    if (_isUwpOrProtocol(path)) return true;
+    return File(path).existsSync();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) {
+        setState(() => _hovered = true);
+        _scaleController.forward();
+      },
+      onExit: (_) {
+        setState(() => _hovered = false);
+        _scaleController.reverse();
+      },
+      child: ScaleTransition(
+        scale: _scaleAnim,
+        child: GestureDetector(
+          onTap: widget.isEditMode ? widget.onEdit : widget.onLaunch,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 80,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: _hovered
+                      ? AppTheme.neonGreen.withValues(alpha: 0.12)
+                      : Colors.white.withValues(alpha: 0.05),
+                  border: Border.all(
+                    color: _hovered
+                        ? AppTheme.neonGreen.withValues(alpha: 0.45)
+                        : Colors.white.withValues(alpha: 0.1),
+                  ),
+                  boxShadow: _hovered
+                      ? [
+                          BoxShadow(
+                            color: AppTheme.neonGreen.withValues(alpha: 0.25),
+                            blurRadius: 20,
+                            spreadRadius: -4,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // App icon
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                      child:
+                          widget.app.iconPath.isNotEmpty &&
+                              File(widget.app.iconPath).existsSync()
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(
+                                File(widget.app.iconPath),
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : Center(
+                              child: Icon(
+                                Icons.apps_rounded,
+                                color: AppTheme.textSecondary,
+                                size: 24,
+                              ),
+                            ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.app.name,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+
+              // Edit controls
+              if (widget.isEditMode || _hovered)
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: Row(
+                    children: [
+                      if (widget.isEditMode && widget.onMoveUp != null)
+                        _EditBubble(
+                          icon: Icons.arrow_upward_rounded,
+                          onTap: widget.onMoveUp!,
+                        ),
+                      if (widget.isEditMode && widget.onMoveDown != null)
+                        _EditBubble(
+                          icon: Icons.arrow_downward_rounded,
+                          onTap: widget.onMoveDown!,
+                        ),
+                      GestureDetector(
+                        onTap: widget.onDelete,
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppTheme.neonPink,
+                          ),
+                          child: Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                            size: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!_pathExists)
+                Positioned(
+                  bottom: -6,
+                  left: 4,
+                  child: Icon(
+                    Icons.warning_amber_rounded,
+                    color: AppTheme.neonPink,
+                    size: 16,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EditBubble extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _EditBubble({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 18,
+        height: 18,
+        margin: const EdgeInsets.only(right: 3),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppTheme.darkCard,
+          border: Border.all(color: AppTheme.glassBorder),
+        ),
+        child: Icon(icon, color: AppTheme.textSecondary, size: 11),
+      ),
+    );
+  }
+}
+
+class _DeleteConfirmDialog extends StatelessWidget {
+  final String title;
+  final String message;
+  final Color accentColor;
+
+  const _DeleteConfirmDialog({
+    required this.title,
+    required this.message,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.darkCard,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: AppTheme.glassBorder),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: accentColor,
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 2,
+        ),
+      ),
+      content: Text(
+        message,
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text('CANCEL', style: TextStyle(color: AppTheme.textMuted)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text('REMOVE', style: TextStyle(color: AppTheme.neonPink)),
+        ),
+      ],
+    );
+  }
+}
+
+bool _isUwpOrProtocol(String path) {
+  return isUwpOrProtocol(path);
+}
