@@ -49,4 +49,51 @@ void main() {
     expect(find.text('31°'), findsOneWidget);
     expect(find.text('22°'), findsOneWidget);
   });
+
+  testWidgets('refresh timer follows dashboard refresh minute changes', (
+    tester,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final dashboardProvider = DashboardProvider(prefs);
+    var forecastRequests = 0;
+    final weatherProvider = WeatherProvider(
+      httpGet: (uri) async {
+        if (uri.host == 'geocoding-api.open-meteo.com') {
+          return http.Response(
+            '{"results":[{"name":"Cairo","latitude":30.06263,"longitude":31.24967}]}',
+            200,
+          );
+        }
+        forecastRequests++;
+        return http.Response(
+          '{"current":{"temperature_2m":24.5,"relative_humidity_2m":52,"apparent_temperature":25.0,"weather_code":0,"wind_speed_10m":1.7},"daily":{"time":["2026-06-03"],"temperature_2m_max":[31.0],"temperature_2m_min":[22.0],"weather_code":[0]}}',
+          200,
+        );
+      },
+    );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider.value(value: dashboardProvider),
+          ChangeNotifierProvider.value(value: weatherProvider),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(body: SizedBox(width: 360, child: WeatherWidget())),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(forecastRequests, 1);
+
+    await dashboardProvider.setWeatherRefreshMinutes(1);
+    await tester.pump();
+    await tester.pump(const Duration(minutes: 1));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(forecastRequests, 2);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -16,4 +16,11 @@ void main() {
     expect(command.executable, 'shutdown');
     expect(command.arguments, ['/r', '/t', '0']);
   });
+
+  test('builds Windows sleep command', () {
+    final command = PowerCommand.forAction(PowerAction.sleep);
+
+    expect(command.executable, 'rundll32');
+    expect(command.arguments, ['powrprof.dll,SetSuspendState', 'Sleep']);
+  });
 }

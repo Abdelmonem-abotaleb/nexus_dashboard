@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -88,6 +90,93 @@ void main() {
     expect(provider.glassIntensity, 0.7);
   });
 
+  test('migrates legacy background image into rotation list', () async {
+    SharedPreferences.setMockInitialValues({
+      'backgroundImage': r'C:\bg\one.jpg',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    expect(provider.backgroundImagePaths, [r'C:\bg\one.jpg']);
+    expect(provider.currentBackgroundImagePath, r'C:\bg\one.jpg');
+  });
+
+  test('adds unique background images and clears them', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    await provider.addBackgroundImages([
+      r'C:\bg\one.jpg',
+      r'C:\bg\two.jpg',
+      r'C:\bg\one.jpg',
+    ]);
+
+    expect(provider.backgroundImagePaths, [r'C:\bg\one.jpg', r'C:\bg\two.jpg']);
+    expect(prefs.getStringList('backgroundImages'), [
+      r'C:\bg\one.jpg',
+      r'C:\bg\two.jpg',
+    ]);
+
+    await provider.clearBackgroundImages();
+
+    expect(provider.backgroundImagePaths, isEmpty);
+    expect(provider.currentBackgroundImagePath, isEmpty);
+    expect(prefs.getStringList('backgroundImages'), isEmpty);
+  });
+
+  test('tracks valid background images outside the build path', () async {
+    final tempDir = await Directory.systemTemp.createTemp('nexus-bg-test');
+    try {
+      final existing = File('${tempDir.path}${Platform.pathSeparator}bg.jpg');
+      await existing.writeAsString('fake image');
+
+      final prefs = await SharedPreferences.getInstance();
+      final provider = DashboardProvider(prefs);
+
+      await provider.addBackgroundImages([existing.path, r'C:\missing.jpg']);
+
+      expect(provider.backgroundImagePaths, [existing.path, r'C:\missing.jpg']);
+      expect(provider.validBackgroundImagePaths, [existing.path]);
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
+  });
+
+  test('persists and validates background rotation interval', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    await provider.setBackgroundRotationMinutes(10);
+
+    expect(provider.backgroundRotationMinutes, 10);
+    expect(prefs.getInt('backgroundRotationMinutes'), 10);
+
+    await provider.setBackgroundRotationMinutes(7);
+
+    expect(provider.backgroundRotationMinutes, 10);
+    expect(prefs.getInt('backgroundRotationMinutes'), 10);
+  });
+
+  test('advances background image through shuffled rotation list', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    await provider.addBackgroundImages([
+      r'C:\bg\one.jpg',
+      r'C:\bg\two.jpg',
+      r'C:\bg\three.jpg',
+    ]);
+
+    final firstPath = provider.currentBackgroundImagePath;
+    provider.advanceBackgroundImage();
+
+    expect(provider.currentBackgroundImagePath, isNot(firstPath));
+    expect(
+      provider.backgroundImagePaths,
+      contains(provider.currentBackgroundImagePath),
+    );
+  });
+
   test('persists widget visibility and order', () async {
     final prefs = await SharedPreferences.getInstance();
     final provider = DashboardProvider(prefs);
@@ -129,8 +218,10 @@ void main() {
 
     expect(provider.visibleWidgetOrder, contains('shutdown'));
     expect(provider.visibleWidgetOrder, contains('restart'));
+    expect(provider.visibleWidgetOrder, contains('sleep'));
     expect(provider.widgetLayout('shutdown').width, greaterThan(0));
     expect(provider.widgetLayout('restart').height, greaterThan(0));
+    expect(provider.widgetLayout('sleep').height, greaterThan(0));
   });
 
   test('reorders websites', () async {
@@ -152,6 +243,18 @@ void main() {
 
     expect(provider.weatherMetricUnits, isFalse);
     expect(provider.weatherRefreshMinutes, 20);
+  });
+
+  test('persists low resource mode preference', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    expect(provider.lowResourceMode, isFalse);
+
+    await provider.setLowResourceMode(true);
+
+    expect(provider.lowResourceMode, isTrue);
+    expect(prefs.getBool('lowResourceMode'), isTrue);
   });
 
   test('model decoding tolerates missing optional fields', () {

@@ -11,21 +11,25 @@ class PowerActionWidget extends StatelessWidget {
   String get _title => switch (action) {
     PowerAction.shutdown => 'SHUT DOWN',
     PowerAction.restart => 'RESTART',
+    PowerAction.sleep => 'SLEEP',
   };
 
   String get _confirmMessage => switch (action) {
     PowerAction.shutdown => 'Shut down Windows now?',
     PowerAction.restart => 'Restart Windows now?',
+    PowerAction.sleep => 'Put Windows to sleep now?',
   };
 
   IconData get _icon => switch (action) {
     PowerAction.shutdown => Icons.power_settings_new_rounded,
     PowerAction.restart => Icons.restart_alt_rounded,
+    PowerAction.sleep => Icons.nights_stay_rounded,
   };
 
   Color get _color => switch (action) {
     PowerAction.shutdown => AppTheme.neonPink,
     PowerAction.restart => const Color(0xFFFFBD2E),
+    PowerAction.sleep => AppTheme.neonBlue,
   };
 
   @override
@@ -64,11 +68,14 @@ class PowerActionWidget extends StatelessWidget {
   }
 
   Future<void> _confirmAndRun(BuildContext context) async {
+    final theme = Theme.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.6),
+      barrierColor: AppTheme.useDarkMode
+          ? Colors.black.withValues(alpha: 0.6)
+          : Colors.white.withValues(alpha: 0.35),
       builder: (_) => AlertDialog(
-        backgroundColor: AppTheme.darkCard,
+        backgroundColor: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(color: AppTheme.glassBorder),
@@ -84,7 +91,7 @@ class PowerActionWidget extends StatelessWidget {
         ),
         content: Text(
           _confirmMessage,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 13),
         ),
         actions: [
           TextButton(

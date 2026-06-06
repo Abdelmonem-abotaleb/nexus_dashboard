@@ -13,6 +13,17 @@ String greetingForHour(int hour) {
   return 'GOOD NIGHT';
 }
 
+Duration clockRefreshDelay(DateTime now, {required bool showSeconds}) {
+  if (showSeconds) return const Duration(seconds: 1);
+  final delay = Duration(
+    minutes: 1,
+    seconds: -now.second,
+    milliseconds: -now.millisecond,
+    microseconds: -now.microsecond,
+  );
+  return delay == Duration.zero ? const Duration(minutes: 1) : delay;
+}
+
 class ClockWidget extends StatefulWidget {
   const ClockWidget({super.key});
 
@@ -21,21 +32,40 @@ class ClockWidget extends StatefulWidget {
 }
 
 class _ClockWidgetState extends State<ClockWidget> {
-  late Timer _timer;
+  Timer? _timer;
   late DateTime _now;
+  bool? _showSeconds;
 
   @override
   void initState() {
     super.initState();
     _now = DateTime.now();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() => _now = DateTime.now());
-    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final showSeconds = context.watch<DashboardProvider>().showSeconds;
+    if (_showSeconds == showSeconds) return;
+    _showSeconds = showSeconds;
+    _timer?.cancel();
+    _scheduleNextTick(showSeconds);
+  }
+
+  void _scheduleNextTick(bool showSeconds) {
+    _timer = Timer(
+      clockRefreshDelay(DateTime.now(), showSeconds: showSeconds),
+      () {
+        if (!mounted) return;
+        setState(() => _now = DateTime.now());
+        _scheduleNextTick(showSeconds);
+      },
+    );
   }
 
   @override
   void dispose() {
-    _timer.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 

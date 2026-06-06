@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
@@ -29,6 +30,8 @@ enum ThemeModePreference {
 }
 
 class DashboardProvider extends ChangeNotifier {
+  static const backgroundRotationMinuteOptions = [1, 2, 5, 10, 15];
+
   static const defaultWidgetOrder = [
     'clock',
     'weather',
@@ -38,6 +41,7 @@ class DashboardProvider extends ChangeNotifier {
     'websites',
     'shutdown',
     'restart',
+    'sleep',
   ];
 
   static const Map<String, DashboardWidgetLayout> defaultWidgetLayouts = {
@@ -49,6 +53,7 @@ class DashboardProvider extends ChangeNotifier {
     'websites': DashboardWidgetLayout(x: 0, y: 6, width: 7, height: 2),
     'shutdown': DashboardWidgetLayout(x: 7, y: 3, width: 2, height: 1),
     'restart': DashboardWidgetLayout(x: 9, y: 3, width: 2, height: 1),
+    'sleep': DashboardWidgetLayout(x: 11, y: 3, width: 1, height: 1),
   };
 
   final SharedPreferences _prefs;
@@ -57,7 +62,12 @@ class DashboardProvider extends ChangeNotifier {
   List<WebShortcut> _websites = [];
   List<TodoItem> _todos = [];
 
-  String _backgroundImagePath = '';
+  List<String> _backgroundImagePaths = [];
+  List<String> _validBackgroundImagePaths = [];
+  int _currentBackgroundImageIndex = 0;
+  int _backgroundRotationMinutes = 2;
+  List<int> _backgroundRotationOrder = [];
+  final Random _backgroundRotationRandom = Random();
   String _userName = 'Abdo';
   String _accentColor = '#00D4FF';
   bool _showSeconds = true;
@@ -86,6 +96,7 @@ class DashboardProvider extends ChangeNotifier {
   );
   bool _weatherMetricUnits = true;
   int _weatherRefreshMinutes = 15;
+  bool _lowResourceMode = false;
 
   DashboardProvider(this._prefs) {
     _loadData();
@@ -95,7 +106,21 @@ class DashboardProvider extends ChangeNotifier {
   List<AppShortcut> get apps => _apps;
   List<WebShortcut> get websites => _websites;
   List<TodoItem> get todos => _todos;
-  String get backgroundImagePath => _backgroundImagePath;
+  List<String> get backgroundImagePaths =>
+      List.unmodifiable(_backgroundImagePaths);
+  List<String> get validBackgroundImagePaths =>
+      List.unmodifiable(_validBackgroundImagePaths);
+  int get backgroundRotationMinutes => _backgroundRotationMinutes;
+  String get currentBackgroundImagePath {
+    if (_backgroundImagePaths.isEmpty) return '';
+    final index = _currentBackgroundImageIndex.clamp(
+      0,
+      _backgroundImagePaths.length - 1,
+    );
+    return _backgroundImagePaths[index];
+  }
+
+  String get backgroundImagePath => currentBackgroundImagePath;
   String get userName => _userName;
   String get accentColor => _accentColor;
   bool get showSeconds => _showSeconds;
@@ -120,6 +145,7 @@ class DashboardProvider extends ChangeNotifier {
   List<String> get widgetOrder => List.unmodifiable(_widgetOrder);
   bool get weatherMetricUnits => _weatherMetricUnits;
   int get weatherRefreshMinutes => _weatherRefreshMinutes;
+  bool get lowResourceMode => _lowResourceMode;
 
   Color get accentColorValue {
     try {
@@ -152,7 +178,18 @@ class DashboardProvider extends ChangeNotifier {
     _todos = todosJson.map((s) => TodoItem.fromJson(jsonDecode(s))).toList();
 
     // Load settings
-    _backgroundImagePath = _prefs.getString('backgroundImage') ?? '';
+    _backgroundImagePaths = _normalizeBackgroundImagePaths(
+      _prefs.getStringList('backgroundImages') ?? [],
+    );
+    final legacyBackgroundImage = _prefs.getString('backgroundImage') ?? '';
+    if (_backgroundImagePaths.isEmpty && legacyBackgroundImage.isNotEmpty) {
+      _backgroundImagePaths = [legacyBackgroundImage];
+      _prefs.setStringList('backgroundImages', _backgroundImagePaths);
+    }
+    _refreshValidBackgroundImages();
+    _backgroundRotationMinutes = _normalizeBackgroundRotationMinutes(
+      _prefs.getInt('backgroundRotationMinutes') ?? 2,
+    );
     final savedUserName = _prefs.getString('userName');
     _userName = savedUserName == null || savedUserName == 'User'
         ? 'Abdo'
@@ -186,6 +223,7 @@ class DashboardProvider extends ChangeNotifier {
     );
     _weatherMetricUnits = _prefs.getBool('weatherMetricUnits') ?? true;
     _weatherRefreshMinutes = _prefs.getInt('weatherRefreshMinutes') ?? 15;
+    _lowResourceMode = _prefs.getBool('lowResourceMode') ?? false;
 
     // Add demo data if first launch
     if (_apps.isEmpty) _loadDemoApps();
@@ -295,6 +333,40 @@ class DashboardProvider extends ChangeNotifier {
           )
           .toList(),
     );
+  }
+
+  List<String> _normalizeBackgroundImagePaths(List<String> paths) {
+    final normalized = <String>[];
+    for (final path in paths) {
+      final trimmed = path.trim();
+      if (trimmed.isEmpty || normalized.contains(trimmed)) continue;
+      normalized.add(trimmed);
+    }
+    return normalized;
+  }
+
+  int _normalizeBackgroundRotationMinutes(int value) {
+    if (backgroundRotationMinuteOptions.contains(value)) return value;
+    return 2;
+  }
+
+  Future<void> _saveBackgroundImages() async {
+    await _prefs.setStringList('backgroundImages', _backgroundImagePaths);
+  }
+
+  void _refreshValidBackgroundImages({bool Function(String path)? fileExists}) {
+    final exists = fileExists ?? (path) => File(path).existsSync();
+    _validBackgroundImagePaths = _backgroundImagePaths
+        .where((path) => exists(path))
+        .toList();
+  }
+
+  void _resetBackgroundRotationOrder() {
+    _backgroundRotationOrder = List.generate(
+      _backgroundImagePaths.length,
+      (index) => index,
+    )..shuffle(_backgroundRotationRandom);
+    _backgroundRotationOrder.remove(_currentBackgroundImageIndex);
   }
 
   // ─── Demo Data ────────────────────────────────────────────────────────────
@@ -486,8 +558,63 @@ class DashboardProvider extends ChangeNotifier {
 
   // ─── Settings ─────────────────────────────────────────────────────────────
   Future<void> setBackgroundImage(String path) async {
-    _backgroundImagePath = path;
+    _backgroundImagePaths = _normalizeBackgroundImagePaths(
+      path.isEmpty ? [] : [path],
+    );
+    _refreshValidBackgroundImages();
+    _currentBackgroundImageIndex = 0;
+    _resetBackgroundRotationOrder();
+    await _saveBackgroundImages();
     await _prefs.setString('backgroundImage', path);
+    notifyListeners();
+  }
+
+  Future<void> addBackgroundImages(List<String> paths) async {
+    final merged = _normalizeBackgroundImagePaths([
+      ..._backgroundImagePaths,
+      ...paths,
+    ]);
+    if (merged.length == _backgroundImagePaths.length) return;
+    final hadNoImages = _backgroundImagePaths.isEmpty;
+    _backgroundImagePaths = merged;
+    _refreshValidBackgroundImages();
+    if (hadNoImages) _currentBackgroundImageIndex = 0;
+    _resetBackgroundRotationOrder();
+    await _saveBackgroundImages();
+    await _prefs.setString('backgroundImage', currentBackgroundImagePath);
+    notifyListeners();
+  }
+
+  Future<void> clearBackgroundImages() async {
+    _backgroundImagePaths = [];
+    _validBackgroundImagePaths = [];
+    _currentBackgroundImageIndex = 0;
+    _backgroundRotationOrder = [];
+    await _saveBackgroundImages();
+    await _prefs.setString('backgroundImage', '');
+    notifyListeners();
+  }
+
+  Future<void> setBackgroundRotationMinutes(int value) async {
+    if (!backgroundRotationMinuteOptions.contains(value)) return;
+    _backgroundRotationMinutes = value;
+    await _prefs.setInt(
+      'backgroundRotationMinutes',
+      _backgroundRotationMinutes,
+    );
+    notifyListeners();
+  }
+
+  void advanceBackgroundImage() {
+    if (_backgroundImagePaths.length < 2) return;
+    if (_currentBackgroundImageIndex >= _backgroundImagePaths.length) {
+      _currentBackgroundImageIndex = 0;
+    }
+    if (_backgroundRotationOrder.isEmpty) {
+      _resetBackgroundRotationOrder();
+    }
+    if (_backgroundRotationOrder.isEmpty) return;
+    _currentBackgroundImageIndex = _backgroundRotationOrder.removeAt(0);
     notifyListeners();
   }
 
@@ -662,6 +789,12 @@ class DashboardProvider extends ChangeNotifier {
   Future<void> setWeatherRefreshMinutes(int value) async {
     _weatherRefreshMinutes = value.clamp(1, 120);
     await _prefs.setInt('weatherRefreshMinutes', _weatherRefreshMinutes);
+    notifyListeners();
+  }
+
+  Future<void> setLowResourceMode(bool value) async {
+    _lowResourceMode = value;
+    await _prefs.setBool('lowResourceMode', value);
     notifyListeners();
   }
 

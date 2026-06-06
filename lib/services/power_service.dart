@@ -1,6 +1,6 @@
 import 'dart:io';
 
-enum PowerAction { shutdown, restart }
+enum PowerAction { shutdown, restart, sleep }
 
 class PowerCommand {
   final String executable;
@@ -17,6 +17,10 @@ class PowerCommand {
       PowerAction.restart => const PowerCommand(
         executable: 'shutdown',
         arguments: ['/r', '/t', '0'],
+      ),
+      PowerAction.sleep => const PowerCommand(
+        executable: 'rundll32',
+        arguments: ['powrprof.dll,SetSuspendState', 'Sleep'],
       ),
     };
   }

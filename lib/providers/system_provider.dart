@@ -1,7 +1,23 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+
+typedef ProcessStarter =
+    Future<Process> Function(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+      Map<String, String>? environment,
+      bool includeParentEnvironment,
+      bool runInShell,
+      ProcessStartMode mode,
+    });
+
+const Duration _windowsStatsTimeout = Duration(seconds: 8);
+const Duration systemStatsPollInterval = Duration(seconds: 30);
+const Duration systemHardwarePollInterval = Duration(minutes: 5);
 
 ({double used, double total}) parseStatPair(
   String output, {
@@ -72,44 +88,189 @@ List<GpuActivity> parseGpuActivities(String output) {
       .toList();
 }
 
+Future<String> runPowerShellStatsScript(
+  String script, {
+  Duration timeout = _windowsStatsTimeout,
+  ProcessStarter processStarter = Process.start,
+}) async {
+  final process = await processStarter('powershell', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-WindowStyle',
+    'Hidden',
+    '-Command',
+    script,
+  ]);
+  final stdout = utf8.decodeStream(process.stdout);
+  final stderr = utf8.decodeStream(process.stderr);
+
+  final exitCode = process.exitCode.timeout(
+    timeout,
+    onTimeout: () {
+      process.kill();
+      throw TimeoutException('PowerShell stats command timed out', timeout);
+    },
+  );
+  final results = await Future.wait<Object>([
+    stdout,
+    stderr,
+    exitCode.then((code) => code as Object),
+  ], eagerError: true);
+  final output = results[0] as String;
+  final errorOutput = results[1] as String;
+  final code = results[2] as int;
+  if (code != 0 && output.trim().isEmpty) {
+    throw ProcessException('powershell', const [], errorOutput, code);
+  }
+  return output;
+}
+
 class SystemProvider extends ChangeNotifier {
+  final ProcessStarter _processStarter;
+  final DateTime Function() _now;
   SystemStats _stats = SystemStats.empty();
   Timer? _timer;
   double _cpuUsage = 0;
+  bool _fetching = false;
+  bool _monitoringEnabled = false;
+  DateTime? _lastHardwareFetch;
+  final String _hostname = Platform.localHostname.isNotEmpty
+      ? Platform.localHostname
+      : 'DESKTOP';
+  double? _cachedCpuTemperatureC;
+  List<GpuActivity> _cachedGpus = const [];
 
   SystemStats get stats => _stats;
   double get cpuUsage => _cpuUsage;
+  bool get monitoringEnabled => _monitoringEnabled;
 
-  SystemProvider() {
-    _startMonitoring();
-  }
-
-  void _startMonitoring() {
-    _fetchStats();
-    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchStats());
-  }
-
-  Future<void> _fetchStats() async {
-    try {
-      if (Platform.isWindows) {
-        await _fetchWindowsStats();
-      } else {
-        _stats = SystemStats.empty();
-      }
-      notifyListeners();
-    } catch (e) {
-      // Use defaults on error
+  SystemProvider({
+    bool monitoringEnabled = true,
+    ProcessStarter processStarter = Process.start,
+    DateTime Function()? now,
+  }) : _processStarter = processStarter,
+       _now = now ?? DateTime.now {
+    if (monitoringEnabled) {
+      _startMonitoring();
     }
   }
 
-  Future<void> _fetchWindowsStats() async {
+  void _startMonitoring() {
+    if (_monitoringEnabled) return;
+    _monitoringEnabled = true;
+    _fetchStats();
+    _timer = Timer.periodic(systemStatsPollInterval, (_) => _fetchStats());
+  }
+
+  void setMonitoringEnabled(bool enabled) {
+    if (enabled) {
+      _startMonitoring();
+      return;
+    }
+    if (!_monitoringEnabled) return;
+    _monitoringEnabled = false;
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  Future<void> _fetchStats() async {
+    if (!_monitoringEnabled) return;
+    if (_fetching) return;
+    _fetching = true;
+    var shouldNotify = false;
     try {
-      final result = await Process.run('powershell', [
-        '-NoProfile',
-        '-command',
-        r'''
+      if (Platform.isWindows) {
+        shouldNotify = await _fetchWindowsStats();
+      } else {
+        _stats = SystemStats.empty();
+        shouldNotify = true;
+      }
+    } catch (e) {
+      // Use defaults on error
+    } finally {
+      _fetching = false;
+    }
+    if (shouldNotify) {
+      notifyListeners();
+    }
+  }
+
+  Future<bool> _fetchWindowsStats() async {
+    try {
+      final fast = await _fetchWindowsFastStats();
+      if (_shouldFetchHardwareStats()) {
+        await _fetchWindowsHardwareStats();
+      }
+      _cpuUsage = fast.cpuUsage;
+      _stats = SystemStats(
+        cpuUsage: fast.cpuUsage,
+        cpuTemperatureC: _cachedCpuTemperatureC,
+        gpus: _cachedGpus,
+        ramUsage: fast.ramUsage,
+        ramTotal: fast.ramTotal,
+        disks: fast.disks,
+        osName: 'Windows 11',
+        hostname: _hostname,
+      );
+      return true;
+    } catch (e) {
+      // Keep last known stats
+      return false;
+    }
+  }
+
+  bool _shouldFetchHardwareStats() {
+    final lastFetch = _lastHardwareFetch;
+    if (lastFetch == null) return true;
+    return _now().difference(lastFetch) >= systemHardwarePollInterval;
+  }
+
+  Future<
+    ({
+      double cpuUsage,
+      double ramUsage,
+      double ramTotal,
+      List<DiskActivity> disks,
+    })
+  >
+  _fetchWindowsFastStats() async {
+    final output = await runPowerShellStatsScript(r'''
 $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
 $os = Get-CimInstance Win32_OperatingSystem
+$ramUsed = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory)/1MB, 2)
+$ramTotal = [math]::Round($os.TotalVisibleMemorySize/1MB, 2)
+$diskRows = @()
+try {
+  $diskRows = Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk -ErrorAction Stop |
+    Where-Object { $_.Name -ne '_Total' } |
+    Sort-Object Name |
+    ForEach-Object {
+      $read = [math]::Round([double]$_.DiskReadBytesPersec, 0)
+      $write = [math]::Round([double]$_.DiskWriteBytesPersec, 0)
+      "$($_.Name)`t$read`t$write"
+    }
+} catch {}
+$diskActivity = ($diskRows -join ';')
+Write-Output "$cpu|$ramUsed,$ramTotal|$diskActivity"
+''', processStarter: _processStarter);
+    final parts = output.trim().split('|');
+    final cpuUsage = parts.isNotEmpty ? double.tryParse(parts[0]) ?? 0.0 : 0.0;
+    final ramStats = parseStatPair(
+      parts.length > 1 ? parts[1] : '',
+      fallbackUsed: _stats.ramUsage,
+      fallbackTotal: _stats.ramTotal,
+    );
+    final disks = parseDiskActivities(parts.length > 2 ? parts[2] : '');
+    return (
+      cpuUsage: cpuUsage,
+      ramUsage: ramStats.used,
+      ramTotal: ramStats.total,
+      disks: disks,
+    );
+  }
+
+  Future<void> _fetchWindowsHardwareStats() async {
+    final output = await runPowerShellStatsScript(r'''
 function Get-HardwareMonitorTemperature {
   param([string]$Pattern)
   foreach ($namespace in @('root/LibreHardwareMonitor', 'root/OpenHardwareMonitor')) {
@@ -233,20 +394,6 @@ public static class NexusAmdAdl {
 if ($null -eq $gpuTemp) {
   $gpuTemp = Get-HardwareMonitorTemperature -Pattern 'GPU|Hot Spot|Junction|Edge|/gpu'
 }
-$ramUsed = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory)/1MB, 2)
-$ramTotal = [math]::Round($os.TotalVisibleMemorySize/1MB, 2)
-$diskRows = @()
-try {
-  $diskRows = Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk -ErrorAction Stop |
-    Where-Object { $_.Name -ne '_Total' } |
-    Sort-Object Name |
-    ForEach-Object {
-      $read = [math]::Round([double]$_.DiskReadBytesPersec, 0)
-      $write = [math]::Round([double]$_.DiskWriteBytesPersec, 0)
-      "$($_.Name)`t$read`t$write"
-    }
-} catch {}
-$diskActivity = ($diskRows -join ';')
 $gpuNames = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
   Where-Object { $_.Name } |
   Select-Object -ExpandProperty Name)
@@ -280,41 +427,20 @@ for ($i = 0; $i -lt $gpuNames.Count; $i++) {
   $gpuRows += "$($gpuNames[$i])`t$usage`t$temp"
 }
 $gpuActivity = ($gpuRows -join ';')
-Write-Output "$cpu|$ramUsed,$ramTotal|$diskActivity|$env:COMPUTERNAME|$cpuTemp|$gpuActivity"
-''',
-      ]);
-      final parts = result.stdout.toString().trim().split('|');
-      _cpuUsage = parts.isNotEmpty ? double.tryParse(parts[0]) ?? 0 : 0;
-      final ramStats = parseStatPair(
-        parts.length > 1 ? parts[1] : '',
-        fallbackUsed: 0,
-        fallbackTotal: 16,
-      );
-      final disks = parseDiskActivities(parts.length > 2 ? parts[2] : '');
-      final hostname = parts.length > 3 ? parts[3].trim() : '';
-      final cpuTemperatureC = parts.length > 4
-          ? parseNullableDouble(parts[4])
-          : null;
-      final gpus = parseGpuActivities(parts.length > 5 ? parts[5] : '');
-
-      _stats = SystemStats(
-        cpuUsage: _cpuUsage,
-        cpuTemperatureC: cpuTemperatureC,
-        gpus: gpus,
-        ramUsage: ramStats.used,
-        ramTotal: ramStats.total,
-        disks: disks,
-        osName: 'Windows 11',
-        hostname: hostname.isNotEmpty ? hostname : 'DESKTOP',
-      );
-    } catch (e) {
-      // Keep last known stats
-    }
+Write-Output "$cpuTemp|$gpuActivity"
+''', processStarter: _processStarter);
+    final parts = output.trim().split('|');
+    _cachedCpuTemperatureC = parts.isNotEmpty
+        ? parseNullableDouble(parts[0])
+        : null;
+    _cachedGpus = parseGpuActivities(parts.length > 1 ? parts[1] : '');
+    _lastHardwareFetch = _now();
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _monitoringEnabled = false;
     super.dispose();
   }
 }

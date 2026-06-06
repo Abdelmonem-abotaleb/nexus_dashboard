@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nexus_dashboard/providers/system_provider.dart';
@@ -52,4 +55,206 @@ void main() {
     expect(gpus[1].usagePercent, 87);
     expect(gpus[1].temperatureC, 71);
   });
+
+  test('kills powershell process when stats command times out', () async {
+    final process = _FakeProcess();
+
+    await expectLater(
+      runPowerShellStatsScript(
+        'Write-Output "slow"',
+        timeout: const Duration(milliseconds: 1),
+        processStarter:
+            (
+              executable,
+              arguments, {
+              workingDirectory,
+              environment,
+              includeParentEnvironment = true,
+              runInShell = false,
+              mode = ProcessStartMode.normal,
+            }) async {
+              expect(executable, 'powershell');
+              expect(arguments, contains('-NonInteractive'));
+              expect(arguments, contains('-WindowStyle'));
+              expect(arguments, contains('Hidden'));
+              return process;
+            },
+      ),
+      throwsA(isA<TimeoutException>()),
+    );
+    expect(process.killed, isTrue);
+  });
+
+  test('stats command timeout completes when process streams stay open', () async {
+    final process = _StreamsStayOpenProcess();
+
+    await expectLater(
+      runPowerShellStatsScript(
+        'Write-Output "slow"',
+        timeout: const Duration(milliseconds: 1),
+        processStarter:
+            (
+              executable,
+              arguments, {
+              workingDirectory,
+              environment,
+              includeParentEnvironment = true,
+              runInShell = false,
+              mode = ProcessStartMode.normal,
+            }) async {
+              return process;
+            },
+      ),
+      throwsA(isA<TimeoutException>()),
+    ).timeout(const Duration(seconds: 1));
+    expect(process.killed, isTrue);
+  });
+
+  test('uses lower frequency polling intervals', () {
+    expect(systemStatsPollInterval, const Duration(seconds: 30));
+    expect(systemHardwarePollInterval, const Duration(minutes: 5));
+  });
+
+  test('does not start stats process while monitoring is disabled', () async {
+    var started = 0;
+    final provider = SystemProvider(
+      monitoringEnabled: false,
+      processStarter:
+          (
+            executable,
+            arguments, {
+            workingDirectory,
+            environment,
+            includeParentEnvironment = true,
+            runInShell = false,
+            mode = ProcessStartMode.normal,
+          }) async {
+            started++;
+            return _CompletedProcess('');
+          },
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(provider.monitoringEnabled, isFalse);
+    expect(started, 0);
+    provider.dispose();
+  });
+
+  test('starts stats process when monitoring is enabled', () async {
+    if (!Platform.isWindows) return;
+    var started = 0;
+    final provider = SystemProvider(
+      monitoringEnabled: false,
+      processStarter:
+          (
+            executable,
+            arguments, {
+            workingDirectory,
+            environment,
+            includeParentEnvironment = true,
+            runInShell = false,
+            mode = ProcessStartMode.normal,
+          }) async {
+            started++;
+            return _CompletedProcess(
+              started == 1 ? '12|7.5,16|0 C:\t1024\t2048' : '61|GPU\t22\t70',
+            );
+          },
+    );
+
+    provider.setMonitoringEnabled(true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(provider.monitoringEnabled, isTrue);
+    expect(started, 2);
+    expect(provider.stats.cpuUsage, 12);
+    expect(provider.stats.gpus.single.temperatureC, 70);
+    provider.dispose();
+  });
+}
+
+class _FakeProcess implements Process {
+  final _stdout = StreamController<List<int>>();
+  final _stderr = StreamController<List<int>>();
+  final _exitCode = Completer<int>();
+  bool killed = false;
+
+  @override
+  Stream<List<int>> get stdout => _stdout.stream;
+
+  @override
+  Stream<List<int>> get stderr => _stderr.stream;
+
+  @override
+  Future<int> get exitCode => _exitCode.future;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed = true;
+    _stdout.close();
+    _stderr.close();
+    if (!_exitCode.isCompleted) {
+      _exitCode.complete(-1);
+    }
+    return true;
+  }
+
+  @override
+  int get pid => 1234;
+
+  @override
+  IOSink get stdin => throw UnimplementedError();
+}
+
+class _StreamsStayOpenProcess implements Process {
+  final _stdout = StreamController<List<int>>();
+  final _stderr = StreamController<List<int>>();
+  final _exitCode = Completer<int>();
+  bool killed = false;
+
+  @override
+  Stream<List<int>> get stdout => _stdout.stream;
+
+  @override
+  Stream<List<int>> get stderr => _stderr.stream;
+
+  @override
+  Future<int> get exitCode => _exitCode.future;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed = true;
+    return true;
+  }
+
+  @override
+  int get pid => 4321;
+
+  @override
+  IOSink get stdin => throw UnimplementedError();
+}
+
+class _CompletedProcess implements Process {
+  final String output;
+
+  _CompletedProcess(this.output);
+
+  @override
+  Stream<List<int>> get stdout => Stream.value(output.codeUnits);
+
+  @override
+  Stream<List<int>> get stderr => const Stream.empty();
+
+  @override
+  Future<int> get exitCode => Future.value(0);
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) => true;
+
+  @override
+  int get pid => 5678;
+
+  @override
+  IOSink get stdin => throw UnimplementedError();
 }

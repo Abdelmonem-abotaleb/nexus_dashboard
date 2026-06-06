@@ -39,9 +39,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   late Animation<double> _fadeAnimation;
   final FocusNode _focusNode = FocusNode();
   Timer? _startupFocusTimer;
+  Timer? _backgroundRotationTimer;
   String _lastWindowSignature = '';
+  String _lastBackgroundRotationSignature = '';
+  bool _pendingWindowUpdate = false;
   bool _settingsOpen = false;
   bool _fullscreenTopBarVisible = false;
+  bool _visualEffectsActive = true;
 
   @override
   void initState() {
@@ -81,6 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     windowManager.removeListener(this);
     _fadeController.dispose();
     _startupFocusTimer?.cancel();
+    _backgroundRotationTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
@@ -97,9 +102,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       platformDarkMode: platformDarkMode,
     );
     AppTheme.glassIntensity = dashboard.glassIntensity;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _applyWindowSettings(dashboard);
-    });
+    _scheduleWindowUpdate();
 
     return KeyboardListener(
       focusNode: _focusNode,
@@ -113,7 +116,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             _buildBackground(dashboard),
 
             // ── Particle effect ──────────────────────────────────────────────
-            const ParticleBackground(),
+            if (shouldRenderParticles(
+              lowResourceMode: dashboard.lowResourceMode,
+            ))
+              ParticleBackground(active: _visualEffectsActive),
 
             // ── Main content ─────────────────────────────────────────────────
             FadeTransition(
@@ -222,6 +228,39 @@ class _DashboardScreenState extends State<DashboardScreen>
     await TrayService.instance.showWindow();
   }
 
+  void _scheduleWindowUpdate() {
+    if (_pendingWindowUpdate) return;
+    _pendingWindowUpdate = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pendingWindowUpdate = false;
+      if (!mounted) return;
+      final dashboard = context.read<DashboardProvider>();
+      _applyWindowSettings(dashboard);
+      _configureBackgroundRotation(dashboard);
+    });
+  }
+
+  void _configureBackgroundRotation(DashboardProvider dashboard) {
+    final validPaths = dashboard.validBackgroundImagePaths;
+    final signature = [
+      dashboard.backgroundRotationMinutes,
+      ...validPaths,
+    ].join('|');
+    if (_lastBackgroundRotationSignature == signature) return;
+    _lastBackgroundRotationSignature = signature;
+    _backgroundRotationTimer?.cancel();
+    _backgroundRotationTimer = null;
+    if (validPaths.length < 2) return;
+
+    _backgroundRotationTimer = Timer.periodic(
+      Duration(minutes: dashboard.backgroundRotationMinutes),
+      (_) {
+        if (!mounted) return;
+        context.read<DashboardProvider>().advanceBackgroundImage();
+      },
+    );
+  }
+
   @override
   void onWindowClose() async {
     if (TrayService.instance.isExiting) {
@@ -234,11 +273,17 @@ class _DashboardScreenState extends State<DashboardScreen>
       await _bringToFront();
       return;
     }
+    if (mounted) {
+      setState(() => _visualEffectsActive = false);
+    }
     await TrayService.instance.hideWindow();
   }
 
   @override
   void onWindowMinimize() async {
+    if (mounted) {
+      setState(() => _visualEffectsActive = false);
+    }
     final dashboard = context.read<DashboardProvider>();
     if (dashboard.takeoverMode && dashboard.protectWindowControls) {
       await windowManager.restore();
@@ -248,73 +293,99 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   void onWindowRestore() async {
+    if (mounted) {
+      setState(() => _visualEffectsActive = true);
+    }
     _lastWindowSignature = '';
     await _applyWindowSettings(context.read<DashboardProvider>());
   }
 
   Widget _buildBackground(DashboardProvider dashboard) {
-    if (dashboard.backgroundImagePath.isNotEmpty) {
-      final file = File(dashboard.backgroundImagePath);
-      if (file.existsSync()) {
-        return SizedBox.expand(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.file(file, fit: BoxFit.cover),
-              Container(
-                color: AppTheme.darkBase.withValues(
-                  alpha: dashboard.backgroundDim,
-                ),
-              ),
-            ],
-          ),
-        );
-      }
-    }
-
-    // Default gradient background
+    final imagePath = _activeBackgroundImagePath(dashboard);
     return SizedBox.expand(
-      child: DecoratedBox(
-        decoration: BoxDecoration(gradient: AppTheme.backgroundGradient),
-        child: Stack(
-          children: [
-            // Subtle radial glows
-            Positioned(
-              top: -200,
-              left: -100,
-              child: Container(
-                width: 600,
-                height: 600,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      AppTheme.neonBlue.withValues(alpha: 0.08),
-                      Colors.transparent,
-                    ],
-                  ),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 700),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        layoutBuilder: (currentChild, previousChildren) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [...previousChildren, ?currentChild],
+          );
+        },
+        child: imagePath.isEmpty
+            ? _buildDefaultBackground()
+            : _buildImageBackground(imagePath, dashboard.backgroundDim),
+      ),
+    );
+  }
+
+  String _activeBackgroundImagePath(DashboardProvider dashboard) {
+    final currentPath = dashboard.currentBackgroundImagePath;
+    if (currentPath.isNotEmpty &&
+        dashboard.validBackgroundImagePaths.contains(currentPath)) {
+      return currentPath;
+    }
+    if (dashboard.validBackgroundImagePaths.isNotEmpty) {
+      return dashboard.validBackgroundImagePaths.first;
+    }
+    return '';
+  }
+
+  Widget _buildImageBackground(String path, double backgroundDim) {
+    return Stack(
+      key: ValueKey('background-image-$path'),
+      fit: StackFit.expand,
+      children: [
+        Image.file(File(path), fit: BoxFit.cover),
+        Container(color: AppTheme.darkBase.withValues(alpha: backgroundDim)),
+      ],
+    );
+  }
+
+  Widget _buildDefaultBackground() {
+    // Default gradient background
+    return DecoratedBox(
+      key: const ValueKey('default-background'),
+      decoration: BoxDecoration(gradient: AppTheme.backgroundGradient),
+      child: Stack(
+        children: [
+          // Subtle radial glows
+          Positioned(
+            top: -200,
+            left: -100,
+            child: Container(
+              width: 600,
+              height: 600,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppTheme.neonBlue.withValues(alpha: 0.08),
+                    Colors.transparent,
+                  ],
                 ),
               ),
             ),
-            Positioned(
-              bottom: -150,
-              right: -100,
-              child: Container(
-                width: 500,
-                height: 500,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      AppTheme.neonPurple.withValues(alpha: 0.08),
-                      Colors.transparent,
-                    ],
-                  ),
+          ),
+          Positioned(
+            bottom: -150,
+            right: -100,
+            child: Container(
+              width: 500,
+              height: 500,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    AppTheme.neonPurple.withValues(alpha: 0.08),
+                    Colors.transparent,
+                  ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -557,6 +628,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         return const PowerActionWidget(action: PowerAction.shutdown);
       case 'restart':
         return const PowerActionWidget(action: PowerAction.restart);
+      case 'sleep':
+        return const PowerActionWidget(action: PowerAction.sleep);
       default:
         return null;
     }
@@ -725,8 +798,12 @@ class _EditableDashboardWidgetState extends State<_EditableDashboardWidget> {
   }
 
   DashboardWidgetLayout _clampLayout(DashboardWidgetLayout layout) {
-    final minHeight = widget.id == 'shutdown' || widget.id == 'restart' ? 1 : 2;
-    final minWidth = widget.id == 'shutdown' || widget.id == 'restart' ? 1 : 2;
+    final isPowerAction =
+        widget.id == 'shutdown' ||
+        widget.id == 'restart' ||
+        widget.id == 'sleep';
+    final minHeight = isPowerAction ? 1 : 2;
+    final minWidth = isPowerAction ? 1 : 2;
     final width = layout.width.clamp(minWidth, widget.columns);
     return layout.copyWith(
       x: layout.x.clamp(0, widget.columns - width),

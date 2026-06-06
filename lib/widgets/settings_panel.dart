@@ -130,95 +130,59 @@ class _SettingsPanelState extends State<SettingsPanel>
 
                     // Background image picker
                     _SettingsRow(
-                      label: 'Background Image',
-                      child: GestureDetector(
-                        onTap: () async {
-                          final wasAlwaysOnTop = await windowManager
-                              .isAlwaysOnTop();
-                          final wasFullScreen = await windowManager
-                              .isFullScreen();
-
-                          try {
-                            if (wasAlwaysOnTop) {
-                              await windowManager.setAlwaysOnTop(false);
-                            }
-                            if (wasFullScreen) {
-                              await windowManager.setFullScreen(false);
-                            }
-                            await windowManager.blur();
-
-                            final result = await FilePicker.pickFiles(
-                              type: FileType.image,
-                            );
-                            if (result != null &&
-                                result.files.single.path != null) {
-                              dashboard.setBackgroundImage(
-                                result.files.single.path!,
-                              );
-                            }
-                          } finally {
-                            if (wasFullScreen) {
-                              await windowManager.setFullScreen(true);
-                            }
-                            if (wasAlwaysOnTop) {
-                              await windowManager.setAlwaysOnTop(true);
-                            }
-                            await windowManager.focus();
-                          }
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.1),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
+                      label: 'Background Images',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             children: [
-                              Icon(
-                                Icons.image_outlined,
-                                color: AppTheme.neonBlue,
-                                size: 14,
+                              _SettingsActionButton(
+                                icon: Icons.add_photo_alternate_outlined,
+                                label: 'Add Images',
+                                onTap: () => _pickBackgroundImages(dashboard),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 12),
                               Text(
-                                dashboard.backgroundImagePath.isEmpty
-                                    ? 'Choose Image'
-                                    : 'Change Image',
+                                '${dashboard.backgroundImagePaths.length} selected',
                                 style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 12,
+                                  color: AppTheme.textMuted,
+                                  fontSize: 11,
                                 ),
                               ),
                             ],
                           ),
-                        ),
+                          if (dashboard.backgroundImagePaths.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            GestureDetector(
+                              onTap: dashboard.clearBackgroundImages,
+                              child: Text(
+                                'Clear background images',
+                                style: TextStyle(
+                                  color: AppTheme.neonPink.withValues(
+                                    alpha: 0.7,
+                                  ),
+                                  fontSize: 11,
+                                  decoration: TextDecoration.underline,
+                                  decorationColor: AppTheme.neonPink.withValues(
+                                    alpha: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
 
-                    if (dashboard.backgroundImagePath.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: () => dashboard.setBackgroundImage(''),
-                        child: Text(
-                          'Remove background image',
-                          style: TextStyle(
-                            color: AppTheme.neonPink.withValues(alpha: 0.7),
-                            fontSize: 11,
-                            decoration: TextDecoration.underline,
-                            decorationColor: AppTheme.neonPink.withValues(
-                              alpha: 0.5,
-                            ),
-                          ),
-                        ),
+                    const SizedBox(height: 16),
+
+                    _SettingsRow(
+                      label: 'Background Rotation',
+                      child: _RotationIntervalPicker(
+                        value: dashboard.backgroundRotationMinutes,
+                        onChanged: dashboard.setBackgroundRotationMinutes,
                       ),
-                    ],
+                    ),
 
                     const SizedBox(height: 16),
 
@@ -393,6 +357,12 @@ class _SettingsPanelState extends State<SettingsPanel>
                       value: dashboard.wakeFocusFallback,
                       onChanged: (v) => dashboard.setWakeFocusFallback(v),
                     ),
+                    const SizedBox(height: 8),
+                    _SettingsToggle(
+                      label: 'Low Resource Mode',
+                      value: dashboard.lowResourceMode,
+                      onChanged: (v) => dashboard.setLowResourceMode(v),
+                    ),
                     _SettingsSlider(
                       label: 'Startup Focus Delay',
                       value: dashboard.startupDelaySeconds.toDouble(),
@@ -557,8 +527,45 @@ class _SettingsPanelState extends State<SettingsPanel>
         return 'Shut Down';
       case 'restart':
         return 'Restart';
+      case 'sleep':
+        return 'Sleep';
       default:
         return id;
+    }
+  }
+
+  Future<void> _pickBackgroundImages(DashboardProvider dashboard) async {
+    final wasAlwaysOnTop = await windowManager.isAlwaysOnTop();
+    final wasFullScreen = await windowManager.isFullScreen();
+
+    try {
+      if (wasAlwaysOnTop) {
+        await windowManager.setAlwaysOnTop(false);
+      }
+      if (wasFullScreen) {
+        await windowManager.setFullScreen(false);
+      }
+      await windowManager.blur();
+
+      final result = await FilePicker.pickFiles(
+        type: FileType.image,
+        allowMultiple: true,
+      );
+      if (result == null) return;
+      final paths = result.files
+          .map((file) => file.path)
+          .whereType<String>()
+          .toList();
+      if (paths.isEmpty) return;
+      await dashboard.addBackgroundImages(paths);
+    } finally {
+      if (wasFullScreen) {
+        await windowManager.setFullScreen(true);
+      }
+      if (wasAlwaysOnTop) {
+        await windowManager.setAlwaysOnTop(true);
+      }
+      await windowManager.focus();
     }
   }
 
@@ -793,6 +800,88 @@ class _ThemeModeButton extends StatelessWidget {
             fontWeight: FontWeight.w700,
             letterSpacing: 1.4,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _SettingsActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: AppTheme.neonBlue, size: 14),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RotationIntervalPicker extends StatelessWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _RotationIntervalPicker({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<int>(
+          value:
+              DashboardProvider.backgroundRotationMinuteOptions.contains(value)
+              ? value
+              : 2,
+          dropdownColor: AppTheme.darkCard,
+          iconEnabledColor: AppTheme.neonBlue,
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          items: DashboardProvider.backgroundRotationMinuteOptions
+              .map(
+                (minutes) => DropdownMenuItem<int>(
+                  value: minutes,
+                  child: Text('$minutes min'),
+                ),
+              )
+              .toList(),
+          onChanged: (minutes) {
+            if (minutes == null) return;
+            onChanged(minutes);
+          },
         ),
       ),
     );

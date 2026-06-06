@@ -14,6 +14,8 @@ void main() async {
 
   // Initialize window manager for Windows desktop
   await windowManager.ensureInitialized();
+  PaintingBinding.instance.imageCache.maximumSize = 8;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 48 << 20;
 
   WindowOptions windowOptions = const WindowOptions(
     size: Size(1440, 900),
@@ -38,7 +40,14 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => DashboardProvider(prefs)),
         ChangeNotifierProvider(create: (_) => WeatherProvider()),
-        ChangeNotifierProvider(create: (_) => SystemProvider()),
+        ChangeNotifierProxyProvider<DashboardProvider, SystemProvider>(
+          create: (_) => SystemProvider(monitoringEnabled: false),
+          update: (_, dashboard, system) {
+            final provider = system ?? SystemProvider(monitoringEnabled: false);
+            provider.setMonitoringEnabled(dashboard.isWidgetEnabled('system'));
+            return provider;
+          },
+        ),
       ],
       child: const NexusDashboardApp(),
     ),

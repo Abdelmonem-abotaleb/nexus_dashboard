@@ -45,6 +45,13 @@ class _WeatherWidgetState extends State<WeatherWidget> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final dashboard = Provider.of<DashboardProvider>(context);
+    _ensureRefreshTimer(dashboard);
+  }
+
+  @override
   void dispose() {
     _refreshTimer?.cancel();
     super.dispose();
@@ -55,7 +62,6 @@ class _WeatherWidgetState extends State<WeatherWidget> {
     final dashboard = context.watch<DashboardProvider>();
     final weather = context.watch<WeatherProvider>();
     final data = weather.weatherData;
-    _ensureRefreshTimer(dashboard);
     final unit = dashboard.weatherMetricUnits ? '°C' : '°F';
     final windUnit = dashboard.weatherMetricUnits ? 'm/s' : 'mph';
 

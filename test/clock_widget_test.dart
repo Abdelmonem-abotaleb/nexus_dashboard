@@ -11,4 +11,17 @@ void main() {
     expect(greetingForHour(18), 'GOOD EVENING');
     expect(greetingForHour(22), 'GOOD NIGHT');
   });
+
+  test('chooses clock refresh delay based on seconds visibility', () {
+    final now = DateTime(2026, 6, 5, 12, 34, 45, 250);
+
+    expect(
+      clockRefreshDelay(now, showSeconds: true),
+      const Duration(seconds: 1),
+    );
+    expect(
+      clockRefreshDelay(now, showSeconds: false),
+      const Duration(seconds: 14, milliseconds: 750),
+    );
+  });
 }
