@@ -24,32 +24,61 @@ Duration clockRefreshDelay(DateTime now, {required bool showSeconds}) {
   return delay == Duration.zero ? const Duration(minutes: 1) : delay;
 }
 
-class ClockWidget extends StatefulWidget {
+class ClockWidget extends StatelessWidget {
   const ClockWidget({super.key});
 
   @override
-  State<ClockWidget> createState() => _ClockWidgetState();
+  Widget build(BuildContext context) {
+    final use24Hour = context.select<DashboardProvider, bool>(
+      (dashboard) => dashboard.use24Hour,
+    );
+    final showSeconds = context.select<DashboardProvider, bool>(
+      (dashboard) => dashboard.showSeconds,
+    );
+    final userName = context.select<DashboardProvider, String>(
+      (dashboard) => dashboard.userName,
+    );
+
+    return _ClockContent(
+      use24Hour: use24Hour,
+      showSeconds: showSeconds,
+      userName: userName,
+    );
+  }
 }
 
-class _ClockWidgetState extends State<ClockWidget> {
+class _ClockContent extends StatefulWidget {
+  final bool use24Hour;
+  final bool showSeconds;
+  final String userName;
+
+  const _ClockContent({
+    required this.use24Hour,
+    required this.showSeconds,
+    required this.userName,
+  });
+
+  @override
+  State<_ClockContent> createState() => _ClockContentState();
+}
+
+class _ClockContentState extends State<_ClockContent> {
   Timer? _timer;
   late DateTime _now;
-  bool? _showSeconds;
 
   @override
   void initState() {
     super.initState();
     _now = DateTime.now();
+    _scheduleNextTick(widget.showSeconds);
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final showSeconds = context.watch<DashboardProvider>().showSeconds;
-    if (_showSeconds == showSeconds) return;
-    _showSeconds = showSeconds;
+  void didUpdateWidget(_ClockContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.showSeconds == widget.showSeconds) return;
     _timer?.cancel();
-    _scheduleNextTick(showSeconds);
+    _scheduleNextTick(widget.showSeconds);
   }
 
   void _scheduleNextTick(bool showSeconds) {
@@ -71,13 +100,9 @@ class _ClockWidgetState extends State<ClockWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final dashboard = context.watch<DashboardProvider>();
-    final use24 = dashboard.use24Hour;
-    final showSec = dashboard.showSeconds;
-
-    final timeFormat = use24
-        ? (showSec ? 'HH:mm:ss' : 'HH:mm')
-        : (showSec ? 'hh:mm:ss a' : 'hh:mm a');
+    final timeFormat = widget.use24Hour
+        ? (widget.showSeconds ? 'HH:mm:ss' : 'HH:mm')
+        : (widget.showSeconds ? 'hh:mm:ss a' : 'hh:mm a');
 
     final timeStr = DateFormat(timeFormat).format(_now);
     final dateStr = DateFormat('EEEE, MMMM d').format(_now);
@@ -106,7 +131,7 @@ class _ClockWidgetState extends State<ClockWidget> {
 
           // User name
           Text(
-            dashboard.userName,
+            widget.userName,
             style: TextStyle(
               color: AppTheme.textPrimary,
               fontSize: 22,

@@ -8,7 +8,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../models/models.dart';
 import '../providers/dashboard_provider.dart';
-import '../providers/weather_provider.dart';
 import '../services/dashboard_grid_service.dart';
 import '../services/power_service.dart';
 import '../services/tray_service.dart';
@@ -40,8 +39,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   final FocusNode _focusNode = FocusNode();
   Timer? _startupFocusTimer;
   Timer? _backgroundRotationTimer;
+  DashboardProvider? _dashboardProvider;
   String _lastWindowSignature = '';
   String _lastBackgroundRotationSignature = '';
+  String _lastDashboardSettingsSignature = '';
   bool _pendingWindowUpdate = false;
   bool _settingsOpen = false;
   bool _fullscreenTopBarVisible = false;
@@ -62,17 +63,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
     _fadeController.forward();
 
-    // Fetch weather after build
+    // Initialize desktop services after build.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       TrayService.instance.initialize();
       final dashProvider = context.read<DashboardProvider>();
-      context.read<WeatherProvider>().fetchWeather(
-        apiKey: dashProvider.weatherApiKey,
-        city: dashProvider.weatherCity.isNotEmpty
-            ? dashProvider.weatherCity
-            : null,
-        useMetricUnits: dashProvider.weatherMetricUnits,
-      );
       _startupFocusTimer = Timer(
         Duration(seconds: dashProvider.startupDelaySeconds),
         _bringToFront,
@@ -81,8 +75,21 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final dashboardProvider = context.read<DashboardProvider>();
+    if (_dashboardProvider == dashboardProvider) return;
+
+    _dashboardProvider?.removeListener(_handleDashboardProviderChange);
+    _dashboardProvider = dashboardProvider;
+    _dashboardProvider!.addListener(_handleDashboardProviderChange);
+    _handleDashboardProviderChange();
+  }
+
+  @override
   void dispose() {
     windowManager.removeListener(this);
+    _dashboardProvider?.removeListener(_handleDashboardProviderChange);
     _fadeController.dispose();
     _startupFocusTimer?.cancel();
     _backgroundRotationTimer?.cancel();
@@ -102,7 +109,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       platformDarkMode: platformDarkMode,
     );
     AppTheme.glassIntensity = dashboard.glassIntensity;
-    _scheduleWindowUpdate();
 
     return KeyboardListener(
       focusNode: _focusNode,
@@ -226,6 +232,30 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _bringToFront() async {
     await TrayService.instance.showWindow();
+  }
+
+  void _handleDashboardProviderChange() {
+    final dashboard = _dashboardProvider;
+    if (dashboard == null) return;
+
+    final signature = _dashboardSettingsSignature(dashboard);
+    if (_lastDashboardSettingsSignature == signature) return;
+    _lastDashboardSettingsSignature = signature;
+    _scheduleWindowUpdate();
+  }
+
+  String _dashboardSettingsSignature(DashboardProvider dashboard) {
+    return [
+      dashboard.takeoverMode,
+      dashboard.fullscreenEnabled,
+      dashboard.alwaysOnTop,
+      dashboard.hideFromTaskbar,
+      dashboard.borderlessEnabled,
+      dashboard.protectWindowControls,
+      dashboard.windowOpacity,
+      dashboard.backgroundRotationMinutes,
+      ...dashboard.validBackgroundImagePaths,
+    ].join('|');
   }
 
   void _scheduleWindowUpdate() {
@@ -354,16 +384,18 @@ class _DashboardScreenState extends State<DashboardScreen>
           Positioned(
             top: -200,
             left: -100,
-            child: Container(
-              width: 600,
-              height: 600,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    AppTheme.neonBlue.withValues(alpha: 0.08),
-                    Colors.transparent,
-                  ],
+            child: RepaintBoundary(
+              child: Container(
+                width: 600,
+                height: 600,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      AppTheme.neonBlue.withValues(alpha: 0.08),
+                      Colors.transparent,
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -371,16 +403,18 @@ class _DashboardScreenState extends State<DashboardScreen>
           Positioned(
             bottom: -150,
             right: -100,
-            child: Container(
-              width: 500,
-              height: 500,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    AppTheme.neonPurple.withValues(alpha: 0.08),
-                    Colors.transparent,
-                  ],
+            child: RepaintBoundary(
+              child: Container(
+                width: 500,
+                height: 500,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      AppTheme.neonPurple.withValues(alpha: 0.08),
+                      Colors.transparent,
+                    ],
+                  ),
                 ),
               ),
             ),

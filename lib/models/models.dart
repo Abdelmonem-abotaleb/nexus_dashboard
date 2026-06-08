@@ -348,7 +348,7 @@ class SystemStats {
     ramUsage: 0,
     ramTotal: 16,
     disks: [],
-    osName: 'Windows 11',
+    osName: 'Windows',
     hostname: 'DESKTOP',
   );
 }

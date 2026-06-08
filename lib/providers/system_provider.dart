@@ -209,7 +209,7 @@ class SystemProvider extends ChangeNotifier {
         ramUsage: fast.ramUsage,
         ramTotal: fast.ramTotal,
         disks: fast.disks,
-        osName: 'Windows 11',
+        osName: fast.osName,
         hostname: _hostname,
       );
       return true;
@@ -231,6 +231,7 @@ class SystemProvider extends ChangeNotifier {
       double ramUsage,
       double ramTotal,
       List<DiskActivity> disks,
+      String osName,
     })
   >
   _fetchWindowsFastStats() async {
@@ -239,6 +240,7 @@ $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentag
 $os = Get-CimInstance Win32_OperatingSystem
 $ramUsed = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory)/1MB, 2)
 $ramTotal = [math]::Round($os.TotalVisibleMemorySize/1MB, 2)
+$osName = if ($os.Caption) { $os.Caption } else { 'Windows' }
 $diskRows = @()
 try {
   $diskRows = Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk -ErrorAction Stop |
@@ -251,7 +253,7 @@ try {
     }
 } catch {}
 $diskActivity = ($diskRows -join ';')
-Write-Output "$cpu|$ramUsed,$ramTotal|$diskActivity"
+Write-Output "$cpu|$ramUsed,$ramTotal|$diskActivity|$osName"
 ''', processStarter: _processStarter);
     final parts = output.trim().split('|');
     final cpuUsage = parts.isNotEmpty ? double.tryParse(parts[0]) ?? 0.0 : 0.0;
@@ -261,11 +263,15 @@ Write-Output "$cpu|$ramUsed,$ramTotal|$diskActivity"
       fallbackTotal: _stats.ramTotal,
     );
     final disks = parseDiskActivities(parts.length > 2 ? parts[2] : '');
+    final osName = parts.length > 3 && parts[3].trim().isNotEmpty
+        ? parts[3].trim()
+        : _stats.osName;
     return (
       cpuUsage: cpuUsage,
       ramUsage: ramStats.used,
       ramTotal: ramStats.total,
       disks: disks,
+      osName: osName,
     );
   }
 

@@ -245,6 +245,32 @@ class AppLauncherWidget extends StatelessWidget {
   }
 }
 
+class AppShortcutPathStatus {
+  final bool iconExists;
+  final bool pathExists;
+
+  const AppShortcutPathStatus({
+    required this.iconExists,
+    required this.pathExists,
+  });
+}
+
+Future<AppShortcutPathStatus> checkAppShortcutPaths(AppShortcut app) async {
+  final path = app.executablePath.replaceAll(
+    '%USERNAME%',
+    Platform.environment['USERNAME'] ?? '',
+  );
+  final iconExistsFuture = app.iconPath.isEmpty
+      ? Future.value(false)
+      : File(app.iconPath).exists();
+  final pathExistsFuture = _isUwpOrProtocol(path)
+      ? Future.value(true)
+      : File(path).exists();
+
+  final results = await Future.wait([iconExistsFuture, pathExistsFuture]);
+  return AppShortcutPathStatus(iconExists: results[0], pathExists: results[1]);
+}
+
 // ─── App Icon ─────────────────────────────────────────────────────────────────
 class _AppIcon extends StatefulWidget {
   final AppShortcut app;
@@ -272,6 +298,10 @@ class _AppIcon extends StatefulWidget {
 class _AppIconState extends State<_AppIcon>
     with SingleTickerProviderStateMixin {
   bool _hovered = false;
+  bool _iconExists = false;
+  bool _pathExists = false;
+  bool _pathsChecked = false;
+  int _pathCheckGeneration = 0;
   late AnimationController _scaleController;
   late Animation<double> _scaleAnim;
 
@@ -286,23 +316,41 @@ class _AppIconState extends State<_AppIcon>
       begin: 1.0,
       end: 1.08,
     ).animate(CurvedAnimation(parent: _scaleController, curve: Curves.easeOut));
+    _checkPaths();
+  }
+
+  @override
+  void didUpdateWidget(_AppIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.app.executablePath != widget.app.executablePath ||
+        oldWidget.app.iconPath != widget.app.iconPath) {
+      _checkPaths();
+    }
   }
 
   @override
   void dispose() {
+    _pathCheckGeneration++;
     _scaleController.dispose();
     super.dispose();
   }
 
-  String get _resolvedPath => widget.app.executablePath.replaceAll(
-    '%USERNAME%',
-    Platform.environment['USERNAME'] ?? '',
-  );
-
-  bool get _pathExists {
-    final path = _resolvedPath;
-    if (_isUwpOrProtocol(path)) return true;
-    return File(path).existsSync();
+  Future<void> _checkPaths() async {
+    final generation = ++_pathCheckGeneration;
+    if (_pathsChecked || _iconExists || _pathExists) {
+      setState(() {
+        _iconExists = false;
+        _pathExists = false;
+        _pathsChecked = false;
+      });
+    }
+    final status = await checkAppShortcutPaths(widget.app);
+    if (!mounted || generation != _pathCheckGeneration) return;
+    setState(() {
+      _iconExists = status.iconExists;
+      _pathExists = status.pathExists;
+      _pathsChecked = true;
+    });
   }
 
   @override
@@ -358,9 +406,7 @@ class _AppIconState extends State<_AppIcon>
                         borderRadius: BorderRadius.circular(12),
                         color: Colors.white.withValues(alpha: 0.08),
                       ),
-                      child:
-                          widget.app.iconPath.isNotEmpty &&
-                              File(widget.app.iconPath).existsSync()
+                      child: _iconExists
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(12),
                               child: Image.file(
@@ -428,7 +474,7 @@ class _AppIconState extends State<_AppIcon>
                     ],
                   ),
                 ),
-              if (!_pathExists)
+              if (_pathsChecked && !_pathExists)
                 Positioned(
                   bottom: -6,
                   left: 4,

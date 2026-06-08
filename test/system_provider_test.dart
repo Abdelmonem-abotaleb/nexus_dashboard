@@ -85,30 +85,33 @@ void main() {
     expect(process.killed, isTrue);
   });
 
-  test('stats command timeout completes when process streams stay open', () async {
-    final process = _StreamsStayOpenProcess();
+  test(
+    'stats command timeout completes when process streams stay open',
+    () async {
+      final process = _StreamsStayOpenProcess();
 
-    await expectLater(
-      runPowerShellStatsScript(
-        'Write-Output "slow"',
-        timeout: const Duration(milliseconds: 1),
-        processStarter:
-            (
-              executable,
-              arguments, {
-              workingDirectory,
-              environment,
-              includeParentEnvironment = true,
-              runInShell = false,
-              mode = ProcessStartMode.normal,
-            }) async {
-              return process;
-            },
-      ),
-      throwsA(isA<TimeoutException>()),
-    ).timeout(const Duration(seconds: 1));
-    expect(process.killed, isTrue);
-  });
+      await expectLater(
+        runPowerShellStatsScript(
+          'Write-Output "slow"',
+          timeout: const Duration(milliseconds: 1),
+          processStarter:
+              (
+                executable,
+                arguments, {
+                workingDirectory,
+                environment,
+                includeParentEnvironment = true,
+                runInShell = false,
+                mode = ProcessStartMode.normal,
+              }) async {
+                return process;
+              },
+        ),
+        throwsA(isA<TimeoutException>()),
+      ).timeout(const Duration(seconds: 1));
+      expect(process.killed, isTrue);
+    },
+  );
 
   test('uses lower frequency polling intervals', () {
     expect(systemStatsPollInterval, const Duration(seconds: 30));
@@ -172,6 +175,40 @@ void main() {
     expect(provider.stats.gpus.single.temperatureC, 70);
     provider.dispose();
   });
+
+  test(
+    'uses Windows operating system caption from fast stats output',
+    () async {
+      if (!Platform.isWindows) return;
+      var started = 0;
+      final provider = SystemProvider(
+        monitoringEnabled: false,
+        processStarter:
+            (
+              executable,
+              arguments, {
+              workingDirectory,
+              environment,
+              includeParentEnvironment = true,
+              runInShell = false,
+              mode = ProcessStartMode.normal,
+            }) async {
+              started++;
+              return _CompletedProcess(
+                started == 1
+                    ? '12|7.5,16|0 C:\t1024\t2048|Microsoft Windows 10 Pro'
+                    : '61|GPU\t22\t70',
+              );
+            },
+      );
+
+      provider.setMonitoringEnabled(true);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(provider.stats.osName, 'Microsoft Windows 10 Pro');
+      provider.dispose();
+    },
+  );
 }
 
 class _FakeProcess implements Process {
