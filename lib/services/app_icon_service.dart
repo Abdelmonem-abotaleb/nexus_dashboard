@@ -6,13 +6,9 @@ String resolveWindowsPath(String path) {
 
 bool isUwpOrProtocol(String path) {
   if (path.startsWith('shell:')) return true;
-  if (path.contains(':') && !path.contains('\\') && !path.contains('/')) {
-    return true;
-  }
-  if (path.contains('!') && !path.contains('\\') && !path.contains('/')) {
-    return true;
-  }
-  return false;
+  if (RegExp(r'^[A-Za-z]:').hasMatch(path)) return false;
+  if (Uri.tryParse(path)?.hasScheme ?? false) return true;
+  return path.isNotEmpty && !path.contains('\\') && !path.contains('/');
 }
 
 bool isAppxAppUserModelId(String path) {
@@ -33,7 +29,12 @@ Future<String> extractWindowsAppIcon({
     );
   }
   if (isUwpOrProtocol(resolvedPath)) {
-    return '';
+    return resolvedPath.contains(':')
+        ? ''
+        : _extractWindowsShellShortcutIcon(
+            appUserModelId: resolvedPath,
+            appId: appId,
+          );
   }
   if (!File(resolvedPath).existsSync()) {
     return '';
@@ -71,6 +72,77 @@ $icon.Dispose()
     ],
     environment: {
       'NEXUS_ICON_EXE_PATH': resolvedPath,
+      'NEXUS_ICON_OUTPUT_PATH': iconPath,
+    },
+  );
+
+  if (result.exitCode == 0 && File(iconPath).existsSync()) {
+    return iconPath;
+  }
+  return '';
+}
+
+Future<String> _extractWindowsShellShortcutIcon({
+  required String appUserModelId,
+  required String appId,
+}) async {
+  final appData = Platform.environment['APPDATA'];
+  if (appData == null || appData.isEmpty) return '';
+
+  final iconDir = Directory('$appData\\NexusDashboard\\icons');
+  if (!iconDir.existsSync()) {
+    iconDir.createSync(recursive: true);
+  }
+
+  final safeId = appId.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+  final iconPath = '${iconDir.path}\\$safeId.png';
+  final result = await Process.run(
+    'powershell',
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      r'''
+Add-Type -AssemblyName System.Drawing
+
+$appUserModelId = $env:NEXUS_APP_AUMID
+$outputPath = $env:NEXUS_ICON_OUTPUT_PATH
+$shell = New-Object -ComObject Shell.Application
+$shortcuts = New-Object -ComObject WScript.Shell
+$roots = @(
+  "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
+  "$env:ProgramData\Microsoft\Windows\Start Menu\Programs"
+)
+
+foreach ($root in $roots) {
+  if (-not (Test-Path -LiteralPath $root)) { continue }
+  foreach ($link in Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue) {
+    $folder = $shell.Namespace($link.DirectoryName)
+    if ($null -eq $folder) { continue }
+    $item = $folder.ParseName($link.Name)
+    if ($null -eq $item -or $item.ExtendedProperty('System.AppUserModel.ID') -ne $appUserModelId) {
+      continue
+    }
+
+    $iconLocation = $shortcuts.CreateShortcut($link.FullName).IconLocation
+    $iconFile = $iconLocation -replace ',\s*-?\d+$', ''
+    if (-not (Test-Path -LiteralPath $iconFile)) { continue }
+
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($iconFile)
+    if ($null -eq $icon) { continue }
+    $bitmap = $icon.ToBitmap()
+    $bitmap.Save($outputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bitmap.Dispose()
+    $icon.Dispose()
+    exit 0
+  }
+}
+exit 2
+''',
+    ],
+    environment: {
+      'NEXUS_APP_AUMID': appUserModelId,
       'NEXUS_ICON_OUTPUT_PATH': iconPath,
     },
   );

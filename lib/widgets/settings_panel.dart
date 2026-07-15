@@ -420,7 +420,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                     const SizedBox(height: 12),
 
                     _SettingsTextField(
-                      label: 'City Name (e.g. Cairo)',
+                      label: 'City Name (Weather & Prayer Times)',
                       controller: _cityController,
                       onChanged: (v) => dashboard.setWeatherCity(v),
                     ),
@@ -515,6 +515,8 @@ class _SettingsPanelState extends State<SettingsPanel>
         return 'Clock';
       case 'weather':
         return 'Weather';
+      case 'prayerTimes':
+        return 'Prayer Times';
       case 'system':
         return 'System Stats';
       case 'apps':

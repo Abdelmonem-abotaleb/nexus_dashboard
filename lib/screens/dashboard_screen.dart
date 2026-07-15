@@ -14,6 +14,7 @@ import '../services/tray_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/clock_widget.dart';
 import '../widgets/weather_widget.dart';
+import '../widgets/prayer_times_widget.dart';
 import '../widgets/app_launcher_widget.dart';
 import '../widgets/website_widget.dart';
 import '../widgets/todo_widget.dart';
@@ -650,6 +651,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         return const ClockWidget();
       case 'weather':
         return const WeatherWidget();
+      case 'prayerTimes':
+        return const PrayerTimesWidget();
       case 'system':
         return const SystemStatsWidget();
       case 'apps':

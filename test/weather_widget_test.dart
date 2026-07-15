@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:nexus_dashboard/models/models.dart';
 import 'package:nexus_dashboard/providers/dashboard_provider.dart';
 import 'package:nexus_dashboard/providers/weather_provider.dart';
 import 'package:nexus_dashboard/widgets/weather_widget.dart';
@@ -96,4 +97,58 @@ void main() {
     expect(forecastRequests, 2);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('ignores unrelated dashboard changes', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final dashboardProvider = DashboardProvider(prefs);
+    final weatherProvider = _CountingWeatherProvider(
+      httpGet: (uri) async => uri.host == 'geocoding-api.open-meteo.com'
+          ? http.Response(
+              '{"results":[{"name":"Cairo","latitude":30.06263,"longitude":31.24967}]}',
+              200,
+            )
+          : http.Response(
+              '{"current":{"temperature_2m":24.5,"relative_humidity_2m":52,"apparent_temperature":25.0,"weather_code":0,"wind_speed_10m":1.7},"daily":{"time":[],"temperature_2m_max":[],"temperature_2m_min":[],"weather_code":[]}}',
+              200,
+            ),
+    );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider.value(value: dashboardProvider),
+          ChangeNotifierProvider<WeatherProvider>.value(value: weatherProvider),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(body: SizedBox(width: 360, child: WeatherWidget())),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final readsBefore = weatherProvider.weatherDataReads;
+
+    await dashboardProvider.setBlurStrength(12);
+    await tester.pump();
+
+    expect(weatherProvider.weatherDataReads, readsBefore);
+
+    await dashboardProvider.setWeatherMetricUnits(false);
+    await tester.pump();
+
+    expect(weatherProvider.weatherDataReads, greaterThan(readsBefore));
+    expect(find.text('°F'), findsOneWidget);
+  });
+}
+
+class _CountingWeatherProvider extends WeatherProvider {
+  _CountingWeatherProvider({required super.httpGet});
+
+  int weatherDataReads = 0;
+
+  @override
+  WeatherData? get weatherData {
+    weatherDataReads++;
+    return super.weatherData;
+  }
 }

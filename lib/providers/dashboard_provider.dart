@@ -35,6 +35,7 @@ class DashboardProvider extends ChangeNotifier {
   static const defaultWidgetOrder = [
     'clock',
     'weather',
+    'prayerTimes',
     'system',
     'todos',
     'apps',
@@ -47,6 +48,7 @@ class DashboardProvider extends ChangeNotifier {
   static const Map<String, DashboardWidgetLayout> defaultWidgetLayouts = {
     'clock': DashboardWidgetLayout(x: 0, y: 0, width: 3, height: 2),
     'weather': DashboardWidgetLayout(x: 3, y: 0, width: 3, height: 3),
+    'prayerTimes': DashboardWidgetLayout(x: 7, y: 6, width: 5, height: 2),
     'system': DashboardWidgetLayout(x: 6, y: 0, width: 3, height: 3),
     'todos': DashboardWidgetLayout(x: 9, y: 0, width: 3, height: 3),
     'apps': DashboardWidgetLayout(x: 0, y: 3, width: 7, height: 3),

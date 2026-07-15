@@ -34,21 +34,14 @@ class _WeatherWidgetState extends State<WeatherWidget> {
     );
   }
 
-  void _ensureRefreshTimer(DashboardProvider dashboard) {
-    if (_refreshMinutes == dashboard.weatherRefreshMinutes) return;
-    _refreshMinutes = dashboard.weatherRefreshMinutes;
+  void _ensureRefreshTimer(int refreshMinutes) {
+    if (_refreshMinutes == refreshMinutes) return;
+    _refreshMinutes = refreshMinutes;
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(
-      Duration(minutes: dashboard.weatherRefreshMinutes),
+      Duration(minutes: refreshMinutes),
       (_) => _refresh(),
     );
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final dashboard = Provider.of<DashboardProvider>(context);
-    _ensureRefreshTimer(dashboard);
   }
 
   @override
@@ -59,11 +52,15 @@ class _WeatherWidgetState extends State<WeatherWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final dashboard = context.watch<DashboardProvider>();
+    final settings = context.select<DashboardProvider, (bool, int)>(
+      (dashboard) =>
+          (dashboard.weatherMetricUnits, dashboard.weatherRefreshMinutes),
+    );
+    _ensureRefreshTimer(settings.$2);
     final weather = context.watch<WeatherProvider>();
     final data = weather.weatherData;
-    final unit = dashboard.weatherMetricUnits ? '°C' : '°F';
-    final windUnit = dashboard.weatherMetricUnits ? 'm/s' : 'mph';
+    final unit = settings.$1 ? '°C' : '°F';
+    final windUnit = settings.$1 ? 'm/s' : 'mph';
 
     return Container(
       padding: const EdgeInsets.all(20),

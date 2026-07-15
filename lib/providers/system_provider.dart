@@ -133,6 +133,7 @@ class SystemProvider extends ChangeNotifier {
   double _cpuUsage = 0;
   bool _fetching = false;
   bool _monitoringEnabled = false;
+  bool _lowResourceMode = false;
   DateTime? _lastHardwareFetch;
   final String _hostname = Platform.localHostname.isNotEmpty
       ? Platform.localHostname
@@ -173,6 +174,17 @@ class SystemProvider extends ChangeNotifier {
     _timer = null;
   }
 
+  void setLowResourceMode(bool enabled) {
+    if (_lowResourceMode == enabled) return;
+    _lowResourceMode = enabled;
+    if (!enabled) {
+      _lastHardwareFetch = null;
+    }
+    if (_monitoringEnabled) {
+      _fetchStats();
+    }
+  }
+
   Future<void> _fetchStats() async {
     if (!_monitoringEnabled) return;
     if (_fetching) return;
@@ -198,14 +210,14 @@ class SystemProvider extends ChangeNotifier {
   Future<bool> _fetchWindowsStats() async {
     try {
       final fast = await _fetchWindowsFastStats();
-      if (_shouldFetchHardwareStats()) {
+      if (!_lowResourceMode && _shouldFetchHardwareStats()) {
         await _fetchWindowsHardwareStats();
       }
       _cpuUsage = fast.cpuUsage;
       _stats = SystemStats(
         cpuUsage: fast.cpuUsage,
-        cpuTemperatureC: _cachedCpuTemperatureC,
-        gpus: _cachedGpus,
+        cpuTemperatureC: _lowResourceMode ? null : _cachedCpuTemperatureC,
+        gpus: _lowResourceMode ? const [] : _cachedGpus,
         ramUsage: fast.ramUsage,
         ramTotal: fast.ramTotal,
         disks: fast.disks,

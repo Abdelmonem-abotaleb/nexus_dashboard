@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'providers/dashboard_provider.dart';
 import 'providers/weather_provider.dart';
+import 'providers/prayer_times_provider.dart';
 import 'providers/system_provider.dart';
 import 'screens/dashboard_screen.dart';
 import 'theme/app_theme.dart';
@@ -40,10 +41,12 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => DashboardProvider(prefs)),
         ChangeNotifierProvider(create: (_) => WeatherProvider()),
+        ChangeNotifierProvider(create: (_) => PrayerTimesProvider()),
         ChangeNotifierProxyProvider<DashboardProvider, SystemProvider>(
           create: (_) => SystemProvider(monitoringEnabled: false),
           update: (_, dashboard, system) {
             final provider = system ?? SystemProvider(monitoringEnabled: false);
+            provider.setLowResourceMode(dashboard.lowResourceMode);
             provider.setMonitoringEnabled(dashboard.isWidgetEnabled('system'));
             return provider;
           },

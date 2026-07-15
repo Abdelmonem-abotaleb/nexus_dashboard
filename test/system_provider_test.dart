@@ -209,6 +209,82 @@ void main() {
       provider.dispose();
     },
   );
+
+  test('low resource mode skips hardware polling', () async {
+    if (!Platform.isWindows) return;
+    var fastCalls = 0;
+    var hardwareCalls = 0;
+    final provider = SystemProvider(
+      monitoringEnabled: false,
+      processStarter:
+          (
+            executable,
+            arguments, {
+            workingDirectory,
+            environment,
+            includeParentEnvironment = true,
+            runInShell = false,
+            mode = ProcessStartMode.normal,
+          }) async {
+            if (arguments.last.contains('NexusAmdAdl')) {
+              hardwareCalls++;
+              return _CompletedProcess('61|GPU\t22\t70');
+            }
+            fastCalls++;
+            return _CompletedProcess('12|7.5,16|0 C:\t1024\t2048|Windows');
+          },
+    );
+
+    provider.setLowResourceMode(true);
+    provider.setMonitoringEnabled(true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(fastCalls, 1);
+    expect(hardwareCalls, 0);
+    provider.dispose();
+  });
+
+  test('low resource mode hides and restores hardware stats', () async {
+    if (!Platform.isWindows) return;
+    var fastCalls = 0;
+    var hardwareCalls = 0;
+    final provider = SystemProvider(
+      monitoringEnabled: false,
+      processStarter:
+          (
+            executable,
+            arguments, {
+            workingDirectory,
+            environment,
+            includeParentEnvironment = true,
+            runInShell = false,
+            mode = ProcessStartMode.normal,
+          }) async {
+            if (arguments.last.contains('NexusAmdAdl')) {
+              hardwareCalls++;
+              return _CompletedProcess('61|GPU\t22\t70');
+            }
+            fastCalls++;
+            return _CompletedProcess('12|7.5,16|0 C:\t1024\t2048|Windows');
+          },
+    );
+
+    provider.setMonitoringEnabled(true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(provider.stats.gpus, isNotEmpty);
+
+    provider.setLowResourceMode(true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(provider.stats.gpus, isEmpty);
+    expect(provider.stats.cpuTemperatureC, isNull);
+
+    provider.setLowResourceMode(false);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(fastCalls, 3);
+    expect(hardwareCalls, 2);
+    expect(provider.stats.gpus, isNotEmpty);
+    provider.dispose();
+  });
 }
 
 class _FakeProcess implements Process {

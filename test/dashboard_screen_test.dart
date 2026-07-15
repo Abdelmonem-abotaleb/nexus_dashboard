@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nexus_dashboard/providers/dashboard_provider.dart';
+import 'package:nexus_dashboard/providers/prayer_times_provider.dart';
 import 'package:nexus_dashboard/providers/system_provider.dart';
 import 'package:nexus_dashboard/providers/weather_provider.dart';
 import 'package:nexus_dashboard/screens/dashboard_screen.dart';
@@ -31,6 +32,7 @@ void main() {
       ],
       'disabledWidgets': [
         'clock',
+        'prayerTimes',
         'system',
         'todos',
         'apps',
@@ -76,6 +78,7 @@ void main() {
         providers: [
           ChangeNotifierProvider(create: (_) => DashboardProvider(prefs)),
           ChangeNotifierProvider.value(value: weatherProvider),
+          ChangeNotifierProvider(create: (_) => PrayerTimesProvider()),
           ChangeNotifierProvider(
             create: (_) => SystemProvider(monitoringEnabled: false),
           ),
