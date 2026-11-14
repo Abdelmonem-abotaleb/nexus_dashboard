@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:math';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class ParticleBackground extends StatefulWidget {
@@ -10,32 +13,24 @@ class ParticleBackground extends StatefulWidget {
   State<ParticleBackground> createState() => _ParticleBackgroundState();
 }
 
-bool shouldRenderParticles({required bool lowResourceMode}) => !lowResourceMode;
+bool shouldRenderParticles({
+  required bool lowResourceMode,
+  bool hasBackgroundImage = false,
+}) => !lowResourceMode && !hasBackgroundImage;
 
-class _ParticleBackgroundState extends State<ParticleBackground>
-    with SingleTickerProviderStateMixin {
-  static const Duration _repaintInterval = Duration(milliseconds: 33);
+class _ParticleBackgroundState extends State<ParticleBackground> {
+  static const Duration _repaintInterval = Duration(milliseconds: 66);
 
-  late AnimationController _controller;
-  late _ThrottledParticleRepaint _repaint;
-  late _ParticlePainter _painter;
+  final ValueNotifier<double> _phase = ValueNotifier(0);
+  Timer? _timer;
   final List<_Particle> _particles = [];
   final Random _random = Random();
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 30),
-    );
-    if (widget.active) {
-      _controller.repeat();
-    }
-    _repaint = _ThrottledParticleRepaint(_controller, _repaintInterval);
-
     // Generate particles
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 16; i++) {
       _particles.add(
         _Particle(
           x: _random.nextDouble(),
@@ -47,7 +42,7 @@ class _ParticleBackgroundState extends State<ParticleBackground>
         ),
       );
     }
-    _painter = _ParticlePainter(_particles, _controller, _repaint);
+    if (widget.active) _startTimer();
   }
 
   @override
@@ -55,23 +50,39 @@ class _ParticleBackgroundState extends State<ParticleBackground>
     super.didUpdateWidget(oldWidget);
     if (widget.active == oldWidget.active) return;
     if (widget.active) {
-      _controller.repeat();
+      _startTimer();
     } else {
-      _controller.stop();
+      _timer?.cancel();
+      _timer = null;
     }
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(_repaintInterval, (_) {
+      _phase.value =
+          (_phase.value + _repaintInterval.inMilliseconds / 30000) % 1;
+    });
   }
 
   @override
   void dispose() {
-    _repaint.dispose();
-    _controller.dispose();
+    _timer?.cancel();
+    _phase.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
-      child: CustomPaint(painter: _painter, size: Size.infinite),
+      child: CustomPaint(
+        painter: _ParticlePainter(
+          _particles,
+          _phase,
+          Theme.of(context).colorScheme.primary,
+        ),
+        size: Size.infinite,
+      ),
     );
   }
 }
@@ -94,47 +105,14 @@ class _Particle {
   });
 }
 
-class _ThrottledParticleRepaint extends ChangeNotifier {
-  final AnimationController animation;
-  final Duration interval;
-  Duration? _lastElapsed;
-
-  _ThrottledParticleRepaint(this.animation, this.interval) {
-    animation.addListener(_handleTick);
-  }
-
-  void _handleTick() {
-    final elapsed = animation.lastElapsedDuration;
-    if (elapsed == null) {
-      notifyListeners();
-      return;
-    }
-    final lastElapsed = _lastElapsed;
-    if (lastElapsed != null) {
-      final delta = elapsed - lastElapsed;
-      if (delta >= Duration.zero && delta < interval) return;
-    }
-    _lastElapsed = elapsed;
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    animation.removeListener(_handleTick);
-    super.dispose();
-  }
-}
-
 class _ParticlePainter extends CustomPainter {
   final List<_Particle> particles;
-  final Animation<double> animation;
+  final ValueListenable<double> animation;
+  final Color color;
   final Paint _paint = Paint()..style = PaintingStyle.fill;
 
-  _ParticlePainter(
-    this.particles,
-    this.animation,
-    Listenable repaint,
-  ) : super(repaint: repaint);
+  _ParticlePainter(this.particles, this.animation, this.color)
+    : super(repaint: animation);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -144,7 +122,7 @@ class _ParticlePainter extends CustomPainter {
       final y = (p.y - p.speed * animValue * 1000) % 1.0;
       final x = (p.x + p.drift * animValue * 1000) % 1.0;
 
-      _paint.color = const Color(0xFF00D4FF).withValues(alpha: p.opacity);
+      _paint.color = color.withValues(alpha: p.opacity);
       canvas.drawCircle(
         Offset(x * size.width, y * size.height),
         p.size,
@@ -155,5 +133,7 @@ class _ParticlePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ParticlePainter old) =>
-      old.particles != particles || old.animation != animation;
+      old.particles != particles ||
+      old.animation != animation ||
+      old.color != color;
 }

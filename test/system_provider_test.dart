@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nexus_dashboard/providers/system_provider.dart';
+import 'package:nexus_dashboard/providers/window_activity_provider.dart';
 
 void main() {
   test('parses comma-separated stat output into doubles', () {
@@ -114,8 +115,27 @@ void main() {
   );
 
   test('uses lower frequency polling intervals', () {
-    expect(systemStatsPollInterval, const Duration(seconds: 30));
-    expect(systemHardwarePollInterval, const Duration(minutes: 5));
+    expect(systemStatsPollInterval, const Duration(seconds: 60));
+    expect(systemHardwarePollInterval, const Duration(minutes: 15));
+  });
+
+  test('computes adaptive stats polling intervals', () {
+    expect(
+      adaptiveStatsInterval(ActivityLevel.focused, lowResource: false),
+      const Duration(seconds: 2),
+    );
+    expect(
+      adaptiveStatsInterval(ActivityLevel.focused, lowResource: true),
+      const Duration(seconds: 5),
+    );
+    expect(
+      adaptiveStatsInterval(ActivityLevel.visibleUnfocused, lowResource: false),
+      const Duration(seconds: 30),
+    );
+    expect(
+      adaptiveStatsInterval(ActivityLevel.hidden, lowResource: false),
+      Duration.zero,
+    );
   });
 
   test('does not start stats process while monitoring is disabled', () async {

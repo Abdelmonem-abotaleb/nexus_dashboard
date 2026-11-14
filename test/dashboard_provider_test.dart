@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -183,45 +184,90 @@ void main() {
 
     await provider.setWidgetEnabled('weather', false);
     provider.reorderDashboardWidget(0, 2);
-    await provider.setWidgetSize('weather', 'large');
-
     expect(provider.isWidgetEnabled('weather'), isFalse);
-    expect(provider.widgetSize('weather'), 'large');
     expect(provider.widgetOrder[1], 'clock');
     expect(prefs.getStringList('disabledWidgets'), contains('weather'));
   });
 
-  test('persists snapped widget layouts', () async {
+  test('migrates legacy layout to breakpoint placements v3', () async {
+    SharedPreferences.setMockInitialValues({
+      'widgetOrder': ['websites', 'clock', 'shutdown'],
+      'widgetSizes': ['clock:large'],
+      'widgetLayouts': ['{"id":"clock","x":4,"y":2,"width":5,"height":2}'],
+      'disabledWidgets': ['shutdown', 'restart', 'sleep', 'weather'],
+      'userName': 'Existing User',
+      'todos': [
+        '{"id":"todo-1","text":"Keep me","completed":false,"createdAt":"2026-01-01T09:00:00.000"}',
+      ],
+    });
     final prefs = await SharedPreferences.getInstance();
     final provider = DashboardProvider(prefs);
 
-    await provider.setWidgetLayout(
-      'apps',
-      const DashboardWidgetLayout(x: 2, y: 4, width: 5, height: 3),
-    );
-
-    expect(provider.widgetLayout('apps').x, 2);
-    expect(provider.widgetLayout('apps').y, 4);
-    expect(provider.widgetLayout('apps').width, 5);
-    expect(provider.widgetLayout('apps').height, 3);
-
-    final reloaded = DashboardProvider(prefs);
-    expect(reloaded.widgetLayout('apps').x, 2);
-    expect(reloaded.widgetLayout('apps').y, 4);
-    expect(reloaded.widgetLayout('apps').width, 5);
-    expect(reloaded.widgetLayout('apps').height, 3);
+    expect(provider.widgetOrder, DashboardProvider.defaultWidgetOrder);
+    expect(provider.isWidgetEnabled('weather'), isFalse);
+    expect(provider.isWidgetEnabled('power'), isFalse);
+    expect(provider.isWidgetEnabled('agenda'), isTrue);
+    expect(provider.userName, 'Existing User');
+    expect(provider.todos.single.text, 'Keep me');
+    expect(prefs.getInt('layoutSchemaVersion'), 3);
+    expect(prefs.containsKey('widgetSizes'), isFalse);
+    expect(prefs.containsKey('widgetLayouts'), isFalse);
+    expect(prefs.getStringList('widgetPlacementsWide'), isNotEmpty);
+    expect(prefs.getStringList('widgetPlacementsMedium'), isNotEmpty);
   });
 
-  test('includes power action widgets by default', () async {
+  test('persists independent wide and medium placements', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+    final wideClock = provider
+        .placementsFor(LayoutBreakpoint.wide)
+        .singleWhere((item) => item.id == 'clock');
+
+    await provider.updateWidgetPlacement(
+      LayoutBreakpoint.wide,
+      wideClock.copyWith(x: 6, y: 6),
+    );
+
+    expect(
+      provider
+          .placementsFor(LayoutBreakpoint.wide)
+          .singleWhere((item) => item.id == 'clock')
+          .x,
+      6,
+    );
+    expect(
+      provider
+          .placementsFor(LayoutBreakpoint.medium)
+          .singleWhere((item) => item.id == 'clock')
+          .x,
+      0,
+    );
+    expect(prefs.getStringList('widgetPlacementsWide'), isNotEmpty);
+  });
+
+  test('removes one background and keeps a valid current selection', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+    await provider.addBackgroundImages(['one.jpg', 'two.jpg', 'three.jpg']);
+    final removed = provider.currentBackgroundImagePath;
+
+    await provider.removeBackgroundImage(removed);
+
+    expect(provider.backgroundImagePaths, isNot(contains(removed)));
+    expect(
+      provider.backgroundImagePaths,
+      contains(provider.currentBackgroundImagePath),
+    );
+    expect(prefs.getStringList('backgroundImages'), hasLength(2));
+  });
+
+  test('includes agenda and consolidated power widget by default', () async {
     final prefs = await SharedPreferences.getInstance();
     final provider = DashboardProvider(prefs);
 
-    expect(provider.visibleWidgetOrder, contains('shutdown'));
-    expect(provider.visibleWidgetOrder, contains('restart'));
-    expect(provider.visibleWidgetOrder, contains('sleep'));
-    expect(provider.widgetLayout('shutdown').width, greaterThan(0));
-    expect(provider.widgetLayout('restart').height, greaterThan(0));
-    expect(provider.widgetLayout('sleep').height, greaterThan(0));
+    expect(provider.visibleWidgetOrder, contains('agenda'));
+    expect(provider.visibleWidgetOrder, contains('power'));
+    expect(provider.visibleWidgetOrder, isNot(contains('shutdown')));
   });
 
   test('reorders websites', () async {
@@ -265,5 +311,64 @@ void main() {
     expect(app.executablePath, isEmpty);
     expect(site.url, isEmpty);
     expect(todo.completed, isFalse);
+  });
+
+  test(
+    'manages desktop widget mode and independent widget selection/order',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      final provider = DashboardProvider(prefs);
+
+      expect(provider.desktopWidgetMode, isFalse);
+      expect(
+        provider.visibleDesktopWidgetOrder,
+        ['clock', 'weather', 'prayerTimes'],
+      );
+
+      await provider.setDesktopWidgetMode(true);
+      expect(provider.desktopWidgetMode, isTrue);
+      expect(prefs.getBool('desktopWidgetMode'), isTrue);
+
+      await provider.setDesktopWidgetEnabled('weather', false);
+      await provider.setDesktopWidgetEnabled('todos', true);
+      expect(provider.isDesktopWidgetEnabled('weather'), isFalse);
+      expect(provider.isDesktopWidgetEnabled('todos'), isTrue);
+      // Full dashboard visibility remains untouched.
+      expect(provider.isWidgetEnabled('weather'), isTrue);
+
+      provider.reorderDesktopWidget(0, 2);
+      expect(provider.desktopWidgetOrder[1], 'clock');
+      expect(provider.widgetOrder[0], 'clock');
+    },
+  );
+
+  test('persists desktop widget window options and per-mode bounds', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    await provider.setDesktopWidgetAlwaysOnTop(true);
+    await provider.setDesktopWidgetHideFromTaskbar(false);
+    await provider.setDesktopWidgetLockPosition(true);
+    await provider.setDesktopWidgetOpacity(0.75);
+    await provider.saveDashboardWindowBounds(
+      const Rect.fromLTWH(40, 60, 1440, 900),
+    );
+    await provider.saveDesktopWidgetWindowBounds(
+      const Rect.fromLTWH(1050, 120, 380, 640),
+    );
+
+    final reloaded = DashboardProvider(prefs);
+    expect(reloaded.desktopWidgetAlwaysOnTop, isTrue);
+    expect(reloaded.desktopWidgetHideFromTaskbar, isFalse);
+    expect(reloaded.desktopWidgetLockPosition, isTrue);
+    expect(reloaded.desktopWidgetOpacity, 0.75);
+    expect(
+      reloaded.dashboardWindowBounds,
+      const Rect.fromLTWH(40, 60, 1440, 900),
+    );
+    expect(
+      reloaded.desktopWidgetWindowBounds,
+      const Rect.fromLTWH(1050, 120, 380, 640),
+    );
   });
 }

@@ -1,46 +1,39 @@
-import 'dart:ui';
+import 'dart:async';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:window_manager/window_manager.dart';
+
 import '../providers/dashboard_provider.dart';
 import '../providers/weather_provider.dart';
 import '../services/startup_service.dart';
-import '../theme/app_theme.dart';
+
+enum _SettingsCategory { appearance, dashboard, data, system }
 
 class SettingsPanel extends StatefulWidget {
   final VoidCallback onClose;
-
-  const SettingsPanel({super.key, required this.onClose});
+  final StartupService? startupService;
+  const SettingsPanel({super.key, required this.onClose, this.startupService});
 
   @override
   State<SettingsPanel> createState() => _SettingsPanelState();
 }
 
-class _SettingsPanelState extends State<SettingsPanel>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _slideController;
-  late Animation<Offset> _slideAnim;
-  late TextEditingController _nameController;
-  late TextEditingController _apiKeyController;
-  late TextEditingController _cityController;
-  final StartupService _startupService = StartupService();
+class _SettingsPanelState extends State<SettingsPanel> {
+  late final StartupService _startupService =
+      widget.startupService ?? StartupService();
+  late final TextEditingController _nameController;
+  late final TextEditingController _apiKeyController;
+  late final TextEditingController _cityController;
+  _SettingsCategory _category = _SettingsCategory.appearance;
   bool _startupEnabled = false;
   bool _startupLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _slideController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _slideAnim = Tween<Offset>(
-      begin: const Offset(1, 0),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _slideController, curve: Curves.easeOut));
-    _slideController.forward();
-
     final dashboard = context.read<DashboardProvider>();
     _nameController = TextEditingController(text: dashboard.userName);
     _apiKeyController = TextEditingController(text: dashboard.weatherApiKey);
@@ -50,7 +43,6 @@ class _SettingsPanelState extends State<SettingsPanel>
 
   @override
   void dispose() {
-    _slideController.dispose();
     _nameController.dispose();
     _apiKeyController.dispose();
     _cityController.dispose();
@@ -60,513 +52,543 @@ class _SettingsPanelState extends State<SettingsPanel>
   @override
   Widget build(BuildContext context) {
     final dashboard = context.watch<DashboardProvider>();
+    final media = MediaQuery.of(context);
+    final compact = media.size.width < 900;
+    final width = compact
+        ? (media.size.width * .92).clamp(260.0, 980.0)
+        : (media.size.width * .82).clamp(700.0, 980.0);
+    final height = compact
+        ? (media.size.height * .92).clamp(220.0, 720.0)
+        : (media.size.height * .86).clamp(560.0, 720.0);
 
-    return SlideTransition(
-      position: _slideAnim,
-      child: Container(
-        width: 360,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          color: AppTheme.darkCard.withValues(alpha: 0.95),
-          border: Border(
-            left: BorderSide(color: AppTheme.glassBorder, width: 1),
-          ),
-        ),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Column(
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.fromLTRB(24, 24, 16, 20),
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(color: AppTheme.glassBorder),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      'SETTINGS',
-                      style: TextStyle(
-                        color: AppTheme.neonBlue,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 3,
-                      ),
+    return Material(
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: .98),
+      elevation: 24,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Column(
+          children: [
+            _header(context),
+            const Divider(height: 1),
+            Expanded(
+              child: compact
+                  ? Column(
+                      children: [
+                        _compactCategories(),
+                        const Divider(height: 1),
+                        Expanded(child: _categoryContent(dashboard)),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        _categoryRail(),
+                        const VerticalDivider(width: 1),
+                        Expanded(child: _categoryContent(dashboard)),
+                      ],
                     ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: widget.onClose,
-                      icon: Icon(
-                        Icons.close_rounded,
-                        color: AppTheme.textMuted,
-                        size: 20,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Content
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(24),
-                  children: [
-                    // ── Profile ──────────────────────────────────────────
-                    _SectionHeader(title: 'PROFILE'),
-                    const SizedBox(height: 12),
-                    _SettingsTextField(
-                      label: 'Display Name',
-                      controller: _nameController,
-                      onChanged: (v) => dashboard.setUserName(v),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // ── Appearance ───────────────────────────────────────
-                    _SectionHeader(title: 'APPEARANCE'),
-                    const SizedBox(height: 12),
-
-                    // Background image picker
-                    _SettingsRow(
-                      label: 'Background Images',
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              _SettingsActionButton(
-                                icon: Icons.add_photo_alternate_outlined,
-                                label: 'Add Images',
-                                onTap: () => _pickBackgroundImages(dashboard),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                '${dashboard.backgroundImagePaths.length} selected',
-                                style: TextStyle(
-                                  color: AppTheme.textMuted,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (dashboard.backgroundImagePaths.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            GestureDetector(
-                              onTap: dashboard.clearBackgroundImages,
-                              child: Text(
-                                'Clear background images',
-                                style: TextStyle(
-                                  color: AppTheme.neonPink.withValues(
-                                    alpha: 0.7,
-                                  ),
-                                  fontSize: 11,
-                                  decoration: TextDecoration.underline,
-                                  decorationColor: AppTheme.neonPink.withValues(
-                                    alpha: 0.5,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    _SettingsRow(
-                      label: 'Background Rotation',
-                      child: _RotationIntervalPicker(
-                        value: dashboard.backgroundRotationMinutes,
-                        onChanged: dashboard.setBackgroundRotationMinutes,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Accent color presets
-                    _SettingsRow(
-                      label: 'Accent Color',
-                      child: Wrap(
-                        spacing: 8,
-                        children:
-                            [
-                              '#00D4FF',
-                              '#7B2FFF',
-                              '#00FF94',
-                              '#FF006E',
-                              '#FF9F0A',
-                              '#FFFFFF',
-                            ].map((hex) {
-                              final selected = dashboard.accentColor == hex;
-                              final color = Color(
-                                int.parse(hex.replaceFirst('#', '0xFF')),
-                              );
-                              return GestureDetector(
-                                onTap: () => dashboard.setAccentColor(hex),
-                                child: Container(
-                                  width: 24,
-                                  height: 24,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: color,
-                                    border: selected
-                                        ? Border.all(
-                                            color: Colors.white,
-                                            width: 2,
-                                          )
-                                        : null,
-                                    boxShadow: selected
-                                        ? [
-                                            BoxShadow(
-                                              color: color.withValues(
-                                                alpha: 0.6,
-                                              ),
-                                              blurRadius: 8,
-                                            ),
-                                          ]
-                                        : null,
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    _SettingsRow(
-                      label: 'Theme Mode',
-                      child: _ThemeModePicker(
-                        value: dashboard.themeModePreference,
-                        onChanged: dashboard.setThemeModePreference,
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    _SettingsSlider(
-                      label: 'Window Opacity',
-                      value: dashboard.windowOpacity,
-                      min: 0.25,
-                      max: 1,
-                      displayValue:
-                          '${(dashboard.windowOpacity * 100).round()}%',
-                      onChanged: (v) => dashboard.setWindowOpacity(v),
-                    ),
-                    _SettingsSlider(
-                      label: 'Background Dim',
-                      value: dashboard.backgroundDim,
-                      min: 0,
-                      max: 0.95,
-                      displayValue:
-                          '${(dashboard.backgroundDim * 100).round()}%',
-                      onChanged: (v) => dashboard.setBackgroundDim(v),
-                    ),
-                    _SettingsSlider(
-                      label: 'Blur Strength',
-                      value: dashboard.blurStrength,
-                      min: 0,
-                      max: 30,
-                      displayValue: dashboard.blurStrength.toStringAsFixed(0),
-                      onChanged: (v) => dashboard.setBlurStrength(v),
-                    ),
-                    _SettingsSlider(
-                      label: 'Glass Intensity',
-                      value: dashboard.glassIntensity,
-                      min: 0.2,
-                      max: 1.4,
-                      displayValue: dashboard.glassIntensity.toStringAsFixed(1),
-                      onChanged: (v) => dashboard.setGlassIntensity(v),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // ── Clock ────────────────────────────────────────────
-                    _SectionHeader(title: 'CLOCK'),
-                    const SizedBox(height: 12),
-
-                    _SettingsToggle(
-                      label: '24-Hour Format',
-                      value: dashboard.use24Hour,
-                      onChanged: (v) => dashboard.setUse24Hour(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Show Seconds',
-                      value: dashboard.showSeconds,
-                      onChanged: (v) => dashboard.setShowSeconds(v),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // ── System ───────────────────────────────────────────
-                    _SectionHeader(title: 'SYSTEM'),
-                    const SizedBox(height: 12),
-
-                    _SettingsToggle(
-                      label: _startupLoading
-                          ? 'Checking Startup...'
-                          : 'Start on Login',
-                      value: _startupEnabled,
-                      onChanged: _startupLoading || !_startupService.isSupported
-                          ? null
-                          : (v) => _setStartupEnabled(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Takeover Mode',
-                      value: dashboard.takeoverMode,
-                      onChanged: (v) => dashboard.setTakeoverMode(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Fullscreen',
-                      value: dashboard.fullscreenEnabled,
-                      onChanged: (v) => dashboard.setFullscreenEnabled(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Borderless Window',
-                      value: dashboard.borderlessEnabled,
-                      onChanged: (v) => dashboard.setBorderlessEnabled(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Always On Top',
-                      value: dashboard.alwaysOnTop,
-                      onChanged: (v) => dashboard.setAlwaysOnTop(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Hide From Taskbar',
-                      value: dashboard.hideFromTaskbar,
-                      onChanged: (v) => dashboard.setHideFromTaskbar(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Protect Window Controls',
-                      value: dashboard.protectWindowControls,
-                      onChanged: (v) => dashboard.setProtectWindowControls(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Wake Focus Fallback',
-                      value: dashboard.wakeFocusFallback,
-                      onChanged: (v) => dashboard.setWakeFocusFallback(v),
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsToggle(
-                      label: 'Low Resource Mode',
-                      value: dashboard.lowResourceMode,
-                      onChanged: (v) => dashboard.setLowResourceMode(v),
-                    ),
-                    _SettingsSlider(
-                      label: 'Startup Focus Delay',
-                      value: dashboard.startupDelaySeconds.toDouble(),
-                      min: 0,
-                      max: 30,
-                      divisions: 30,
-                      displayValue: '${dashboard.startupDelaySeconds}s',
-                      onChanged: (v) =>
-                          dashboard.setStartupDelaySeconds(v.round()),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // ── Widgets ──────────────────────────────────────────
-                    _SectionHeader(title: 'WIDGETS'),
-                    const SizedBox(height: 12),
-                    ...dashboard.widgetOrder.map(
-                      (id) => _WidgetControlRow(
-                        label: _widgetLabel(id),
-                        enabled: dashboard.isWidgetEnabled(id),
-                        canMoveUp: dashboard.widgetOrder.indexOf(id) > 0,
-                        canMoveDown:
-                            dashboard.widgetOrder.indexOf(id) <
-                            dashboard.widgetOrder.length - 1,
-                        onToggle: (v) => dashboard.setWidgetEnabled(id, v),
-                        onMoveUp: () {
-                          final index = dashboard.widgetOrder.indexOf(id);
-                          dashboard.reorderDashboardWidget(index, index - 1);
-                        },
-                        onMoveDown: () {
-                          final index = dashboard.widgetOrder.indexOf(id);
-                          dashboard.reorderDashboardWidget(index, index + 2);
-                        },
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // ── Weather ──────────────────────────────────────────
-                    _SectionHeader(title: 'WEATHER'),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Leave API key empty to use free Open-Meteo weather.',
-                      style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                    ),
-                    const SizedBox(height: 12),
-
-                    _SettingsTextField(
-                      label: 'OpenWeather API Key',
-                      controller: _apiKeyController,
-                      obscureText: true,
-                      onChanged: (v) => dashboard.setWeatherApiKey(v),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _SettingsTextField(
-                      label: 'City Name (Weather & Prayer Times)',
-                      controller: _cityController,
-                      onChanged: (v) => dashboard.setWeatherCity(v),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _SettingsToggle(
-                      label: 'Metric Units',
-                      value: dashboard.weatherMetricUnits,
-                      onChanged: (v) => dashboard.setWeatherMetricUnits(v),
-                    ),
-                    _SettingsSlider(
-                      label: 'Refresh Interval',
-                      value: dashboard.weatherRefreshMinutes.toDouble(),
-                      min: 1,
-                      max: 120,
-                      divisions: 119,
-                      displayValue: '${dashboard.weatherRefreshMinutes}m',
-                      onChanged: (v) =>
-                          dashboard.setWeatherRefreshMinutes(v.round()),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () {
-                          context.read<WeatherProvider>().fetchWeather(
-                            apiKey: _apiKeyController.text,
-                            city: _cityController.text.isNotEmpty
-                                ? _cityController.text
-                                : null,
-                            useMetricUnits: dashboard.weatherMetricUnits,
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Refreshing weather...'),
-                              duration: Duration(seconds: 1),
-                            ),
-                          );
-                        },
-                        style: TextButton.styleFrom(
-                          backgroundColor: AppTheme.neonPurple.withValues(
-                            alpha: 0.1,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            side: BorderSide(
-                              color: AppTheme.neonPurple.withValues(alpha: 0.3),
-                            ),
-                          ),
-                        ),
-                        child: Text(
-                          'REFRESH WEATHER',
-                          style: TextStyle(
-                            color: AppTheme.neonPurple,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Version
-                    Center(
-                      child: Text(
-                        'NEXUS DASHBOARD  v1.0.0',
-                        style: TextStyle(
-                          color: AppTheme.textMuted,
-                          fontSize: 10,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  String _widgetLabel(String id) {
-    switch (id) {
-      case 'clock':
-        return 'Clock';
-      case 'weather':
-        return 'Weather';
-      case 'prayerTimes':
-        return 'Prayer Times';
-      case 'system':
-        return 'System Stats';
-      case 'apps':
-        return 'App Launcher';
-      case 'websites':
-        return 'Websites';
-      case 'todos':
-        return 'To-Do';
-      case 'shutdown':
-        return 'Shut Down';
-      case 'restart':
-        return 'Restart';
-      case 'sleep':
-        return 'Sleep';
-      default:
-        return id;
-    }
-  }
+  Widget _header(BuildContext context) => SizedBox(
+    height: 64,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      child: Row(
+        children: [
+          Icon(
+            Icons.tune_rounded,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Text('Settings', style: Theme.of(context).textTheme.titleLarge),
+          const Spacer(),
+          Text('1.2.0 (5)', style: Theme.of(context).textTheme.labelMedium),
+          const SizedBox(width: 12),
+          IconButton(
+            tooltip: 'Close settings',
+            onPressed: widget.onClose,
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _categoryRail() => NavigationRail(
+    selectedIndex: _category.index,
+    onDestinationSelected: (index) =>
+        setState(() => _category = _SettingsCategory.values[index]),
+    extended: true,
+    minExtendedWidth: 210,
+    groupAlignment: -1,
+    destinations: const [
+      NavigationRailDestination(
+        icon: Icon(Icons.palette_outlined),
+        selectedIcon: Icon(Icons.palette_rounded),
+        label: Text('Appearance'),
+      ),
+      NavigationRailDestination(
+        icon: Icon(Icons.dashboard_outlined),
+        selectedIcon: Icon(Icons.dashboard_rounded),
+        label: Text('Dashboard'),
+      ),
+      NavigationRailDestination(
+        icon: Icon(Icons.cloud_outlined),
+        selectedIcon: Icon(Icons.cloud_rounded),
+        label: Text('Data & Weather'),
+      ),
+      NavigationRailDestination(
+        icon: Icon(Icons.computer_outlined),
+        selectedIcon: Icon(Icons.computer_rounded),
+        label: Text('System'),
+      ),
+    ],
+  );
+
+  Widget _compactCategories() => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    child: SegmentedButton<_SettingsCategory>(
+      segments: const [
+        ButtonSegment(
+          value: _SettingsCategory.appearance,
+          label: Text('Appearance'),
+        ),
+        ButtonSegment(
+          value: _SettingsCategory.dashboard,
+          label: Text('Dashboard'),
+        ),
+        ButtonSegment(value: _SettingsCategory.data, label: Text('Data')),
+        ButtonSegment(value: _SettingsCategory.system, label: Text('System')),
+      ],
+      selected: {_category},
+      onSelectionChanged: (value) => setState(() => _category = value.first),
+    ),
+  );
+
+  Widget _categoryContent(DashboardProvider dashboard) => FocusTraversalGroup(
+    child: ListView(
+      padding: const EdgeInsets.all(28),
+      children: switch (_category) {
+        _SettingsCategory.appearance => _appearanceSettings(dashboard),
+        _SettingsCategory.dashboard => _dashboardSettings(dashboard),
+        _SettingsCategory.data => _dataSettings(dashboard),
+        _SettingsCategory.system => _systemSettings(dashboard),
+      },
+    ),
+  );
+
+  List<Widget> _appearanceSettings(DashboardProvider dashboard) => [
+    const _PageHeading(
+      'Appearance',
+      'Personalize the dashboard without sacrificing readability.',
+    ),
+    _DebouncedTextField(
+      label: 'Display name',
+      controller: _nameController,
+      onCommit: dashboard.setUserName,
+    ),
+    const SizedBox(height: 20),
+    _SettingBlock(
+      title: 'Theme mode',
+      child: SegmentedButton<ThemeModePreference>(
+        segments: const [
+          ButtonSegment(
+            value: ThemeModePreference.system,
+            label: Text('System'),
+          ),
+          ButtonSegment(value: ThemeModePreference.light, label: Text('Light')),
+          ButtonSegment(value: ThemeModePreference.dark, label: Text('Dark')),
+        ],
+        selected: {dashboard.themeModePreference},
+        onSelectionChanged: (value) =>
+            dashboard.setThemeModePreference(value.first),
+      ),
+    ),
+    const SizedBox(height: 20),
+    _SettingBlock(
+      title: 'Accent color',
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ChoiceChip(
+            label: const Text('Windows Accent'),
+            selected: dashboard.followSystemAccent,
+            onSelected: (val) {
+              if (val) dashboard.setFollowSystemAccent(true);
+            },
+          ),
+          ...const ['#2D7FF9', '#00A884', '#7C5CFC', '#D97706'].map(
+            (hex) => _AccentChoice(
+              hex: hex,
+              selected:
+                  !dashboard.followSystemAccent && dashboard.accentColor == hex,
+              onSelected: () => dashboard.setAccentColor(hex),
+            ),
+          ),
+        ],
+      ),
+    ),
+    const SizedBox(height: 20),
+    _SettingBlock(
+      title: 'Background images',
+      subtitle: '${dashboard.backgroundImagePaths.length} selected',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _pickBackgroundImages(dashboard),
+                icon: const Icon(Icons.add_photo_alternate_outlined),
+                label: const Text('Add images'),
+              ),
+              OutlinedButton.icon(
+                onPressed: dashboard.backgroundImagePaths.length > 1
+                    ? dashboard.advanceBackgroundImage
+                    : null,
+                icon: const Icon(Icons.shuffle_rounded),
+                label: const Text('Shuffle next'),
+              ),
+              if (dashboard.backgroundImagePaths.isNotEmpty)
+                TextButton.icon(
+                  onPressed: dashboard.clearBackgroundImages,
+                  icon: const Icon(Icons.clear_rounded),
+                  label: const Text('Clear all'),
+                ),
+              DropdownButton<int>(
+                value: dashboard.backgroundRotationMinutes,
+                items: DashboardProvider.backgroundRotationMinuteOptions
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text('Rotate every $value min'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    dashboard.setBackgroundRotationMinutes(value);
+                  }
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (dashboard.backgroundImagePaths.isEmpty)
+            Text(
+              'Choose two or more pictures to rotate them in shuffled order.',
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          else
+            _BackgroundGallery(
+              paths: dashboard.backgroundImagePaths,
+              currentPath: dashboard.currentBackgroundImagePath,
+              onRemove: dashboard.removeBackgroundImage,
+            ),
+        ],
+      ),
+    ),
+    const SizedBox(height: 18),
+    _CommitSlider(
+      label: 'Window opacity',
+      value: dashboard.windowOpacity,
+      min: .25,
+      max: 1,
+      divisions: 15,
+      onCommit: dashboard.setWindowOpacity,
+    ),
+    _CommitSlider(
+      label: 'Background dim',
+      value: dashboard.backgroundDim,
+      min: 0,
+      max: .95,
+      divisions: 19,
+      onCommit: dashboard.setBackgroundDim,
+    ),
+    _CommitSlider(
+      label: 'Blur strength',
+      value: dashboard.blurStrength,
+      min: 0,
+      max: 30,
+      divisions: 30,
+      onCommit: dashboard.setBlurStrength,
+    ),
+    _CommitSlider(
+      label: 'Surface intensity',
+      value: dashboard.glassIntensity,
+      min: .2,
+      max: 1.4,
+      divisions: 12,
+      onCommit: dashboard.setGlassIntensity,
+    ),
+    const SizedBox(height: 20),
+    _SettingBlock(
+      title: 'Backdrop Material',
+      subtitle: 'Native Windows blur styling',
+      child: Wrap(
+        spacing: 8,
+        children: ['mica', 'acrylic', 'solid'].map((mode) {
+          final isSelected = dashboard.backdropEffect == mode;
+          final label = switch (mode) {
+            'mica' => 'Mica (Windows 11)',
+            'acrylic' => 'Acrylic Blur',
+            _ => 'Solid Canvas',
+          };
+          return ChoiceChip(
+            label: Text(label),
+            selected: isSelected,
+            onSelected: (_) => dashboard.setBackdropEffect(mode),
+          );
+        }).toList(),
+      ),
+    ),
+  ];
+
+  List<Widget> _dashboardSettings(DashboardProvider dashboard) => [
+    const _PageHeading(
+      'Dashboard',
+      'Choose which cards appear and set their reading order.',
+    ),
+    _SwitchSetting(
+      title: '24-hour clock',
+      value: dashboard.use24Hour,
+      onChanged: dashboard.setUse24Hour,
+    ),
+    _SwitchSetting(
+      title: 'Show seconds',
+      value: dashboard.showSeconds,
+      onChanged: dashboard.setShowSeconds,
+    ),
+    const SizedBox(height: 18),
+    Text('WIDGETS', style: Theme.of(context).textTheme.labelSmall),
+    const SizedBox(height: 8),
+    ...dashboard.widgetOrder.asMap().entries.map((entry) {
+      final index = entry.key;
+      final id = entry.value;
+      return _WidgetOrderTile(
+        label: _widgetLabel(id),
+        enabled: dashboard.isWidgetEnabled(id),
+        canMoveUp: index > 0,
+        canMoveDown: index < dashboard.widgetOrder.length - 1,
+        onToggle: (value) => dashboard.setWidgetEnabled(id, value),
+        onMoveUp: () => dashboard.reorderDashboardWidget(index, index - 1),
+        onMoveDown: () => dashboard.reorderDashboardWidget(index, index + 2),
+      );
+    }),
+    const SizedBox(height: 24),
+    const Divider(),
+    const SizedBox(height: 18),
+    Text('DESKTOP WIDGET MODE', style: Theme.of(context).textTheme.labelSmall),
+    const SizedBox(height: 8),
+    _SwitchSetting(
+      title: 'Desktop widget mode',
+      value: dashboard.desktopWidgetMode,
+      onChanged: dashboard.setDesktopWidgetMode,
+    ),
+    _SwitchSetting(
+      title: 'Pin desktop widget (Always on top)',
+      value: dashboard.desktopWidgetAlwaysOnTop,
+      onChanged: dashboard.setDesktopWidgetAlwaysOnTop,
+    ),
+    _SwitchSetting(
+      title: 'Hide desktop widget from taskbar',
+      value: dashboard.desktopWidgetHideFromTaskbar,
+      onChanged: dashboard.setDesktopWidgetHideFromTaskbar,
+    ),
+    _SwitchSetting(
+      title: 'Lock desktop widget position & size',
+      value: dashboard.desktopWidgetLockPosition,
+      onChanged: dashboard.setDesktopWidgetLockPosition,
+    ),
+    const SizedBox(height: 8),
+    _CommitSlider(
+      label: 'Desktop widget opacity',
+      value: dashboard.desktopWidgetOpacity,
+      min: .25,
+      max: 1,
+      divisions: 15,
+      onCommit: dashboard.setDesktopWidgetOpacity,
+    ),
+    const SizedBox(height: 16),
+    Text(
+      'DESKTOP WIDGET CARDS',
+      style: Theme.of(context).textTheme.labelSmall,
+    ),
+    const SizedBox(height: 8),
+    ...dashboard.desktopWidgetOrder.asMap().entries.map((entry) {
+      final index = entry.key;
+      final id = entry.value;
+      return _WidgetOrderTile(
+        label: _widgetLabel(id),
+        enabled: dashboard.isDesktopWidgetEnabled(id),
+        canMoveUp: index > 0,
+        canMoveDown: index < dashboard.desktopWidgetOrder.length - 1,
+        onToggle: (value) => dashboard.setDesktopWidgetEnabled(id, value),
+        onMoveUp: () => dashboard.reorderDesktopWidget(index, index - 1),
+        onMoveDown: () => dashboard.reorderDesktopWidget(index, index + 2),
+      );
+    }),
+  ];
+
+  List<Widget> _dataSettings(DashboardProvider dashboard) => [
+    const _PageHeading(
+      'Data & Weather',
+      'Weather uses Open-Meteo unless an OpenWeather key is supplied.',
+    ),
+    _DebouncedTextField(
+      label: 'City name (weather and prayer times)',
+      controller: _cityController,
+      onCommit: dashboard.setWeatherCity,
+    ),
+    const SizedBox(height: 16),
+    _DebouncedTextField(
+      label: 'OpenWeather API key (optional)',
+      controller: _apiKeyController,
+      obscureText: true,
+      onCommit: dashboard.setWeatherApiKey,
+    ),
+    const SizedBox(height: 12),
+    _SwitchSetting(
+      title: 'Metric units',
+      value: dashboard.weatherMetricUnits,
+      onChanged: dashboard.setWeatherMetricUnits,
+    ),
+    _CommitSlider(
+      label: 'Weather refresh minutes',
+      value: dashboard.weatherRefreshMinutes.toDouble(),
+      min: 1,
+      max: 120,
+      divisions: 119,
+      display: (value) => '${value.round()} min',
+      onCommit: (value) => dashboard.setWeatherRefreshMinutes(value.round()),
+    ),
+    const SizedBox(height: 12),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: FilledButton.icon(
+        onPressed: () {
+          context.read<WeatherProvider>().fetchWeather(
+            apiKey: _apiKeyController.text.trim(),
+            city: _cityController.text.trim().isEmpty
+                ? null
+                : _cityController.text.trim(),
+            useMetricUnits: dashboard.weatherMetricUnits,
+          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Refreshing weather…')));
+        },
+        icon: const Icon(Icons.refresh_rounded),
+        label: const Text('Refresh weather'),
+      ),
+    ),
+  ];
+
+  List<Widget> _systemSettings(DashboardProvider dashboard) => [
+    const _PageHeading(
+      'System',
+      'Control startup, focus behavior, and Windows takeover mode.',
+    ),
+    _SwitchSetting(
+      title: _startupLoading ? 'Checking startup setting…' : 'Start on login',
+      value: _startupEnabled,
+      onChanged: _startupLoading ? null : _setStartupEnabled,
+    ),
+    _SwitchSetting(
+      title: 'Takeover mode',
+      value: dashboard.takeoverMode,
+      onChanged: dashboard.setTakeoverMode,
+    ),
+    _SwitchSetting(
+      title: 'Fullscreen',
+      value: dashboard.fullscreenEnabled,
+      onChanged: dashboard.setFullscreenEnabled,
+    ),
+    _SwitchSetting(
+      title: 'Borderless window',
+      value: dashboard.borderlessEnabled,
+      onChanged: dashboard.setBorderlessEnabled,
+    ),
+    _SwitchSetting(
+      title: 'Always on top',
+      value: dashboard.alwaysOnTop,
+      onChanged: dashboard.setAlwaysOnTop,
+    ),
+    _SwitchSetting(
+      title: 'Hide from taskbar',
+      value: dashboard.hideFromTaskbar,
+      onChanged: dashboard.setHideFromTaskbar,
+    ),
+    _SwitchSetting(
+      title: 'Protect window controls',
+      value: dashboard.protectWindowControls,
+      onChanged: dashboard.setProtectWindowControls,
+    ),
+    _SwitchSetting(
+      title: 'Wake focus fallback',
+      value: dashboard.wakeFocusFallback,
+      onChanged: dashboard.setWakeFocusFallback,
+    ),
+    _SwitchSetting(
+      title: 'Low-resource mode',
+      value: dashboard.lowResourceMode,
+      onChanged: dashboard.setLowResourceMode,
+    ),
+    _CommitSlider(
+      label: 'Startup focus delay',
+      value: dashboard.startupDelaySeconds.toDouble(),
+      min: 0,
+      max: 30,
+      divisions: 30,
+      display: (value) => '${value.round()} sec',
+      onCommit: (value) => dashboard.setStartupDelaySeconds(value.round()),
+    ),
+  ];
+
+  String _widgetLabel(String id) => switch (id) {
+    'clock' => 'Clock',
+    'weather' => 'Weather',
+    'agenda' => 'Agenda',
+    'apps' => 'App launcher',
+    'todos' => 'To-do',
+    'prayerTimes' => 'Prayer times',
+    'system' => 'System stats',
+    'power' => 'Power actions',
+    'websites' => 'Websites',
+    _ => id,
+  };
 
   Future<void> _pickBackgroundImages(DashboardProvider dashboard) async {
     final wasAlwaysOnTop = await windowManager.isAlwaysOnTop();
     final wasFullScreen = await windowManager.isFullScreen();
-
     try {
-      if (wasAlwaysOnTop) {
-        await windowManager.setAlwaysOnTop(false);
-      }
-      if (wasFullScreen) {
-        await windowManager.setFullScreen(false);
-      }
+      if (wasAlwaysOnTop) await windowManager.setAlwaysOnTop(false);
+      if (wasFullScreen) await windowManager.setFullScreen(false);
       await windowManager.blur();
-
       final result = await FilePicker.pickFiles(
         type: FileType.image,
         allowMultiple: true,
       );
-      if (result == null) return;
-      final paths = result.files
-          .map((file) => file.path)
-          .whereType<String>()
-          .toList();
-      if (paths.isEmpty) return;
-      await dashboard.addBackgroundImages(paths);
+      final paths =
+          result?.files.map((file) => file.path).whereType<String>().toList() ??
+          const [];
+      if (paths.isNotEmpty) await dashboard.addBackgroundImages(paths);
     } finally {
-      if (wasFullScreen) {
-        await windowManager.setFullScreen(true);
-      }
-      if (wasAlwaysOnTop) {
-        await windowManager.setAlwaysOnTop(true);
-      }
+      if (wasFullScreen) await windowManager.setFullScreen(true);
+      if (wasAlwaysOnTop) await windowManager.setAlwaysOnTop(true);
       await windowManager.focus();
     }
   }
@@ -580,369 +602,343 @@ class _SettingsPanelState extends State<SettingsPanel>
     });
   }
 
-  Future<void> _setStartupEnabled(bool enabled) async {
+  Future<void> _setStartupEnabled(bool value) async {
     setState(() => _startupLoading = true);
-
     try {
-      await _startupService.setEnabled(enabled);
+      await _startupService.setEnabled(value);
       if (!mounted) return;
       setState(() {
-        _startupEnabled = enabled;
+        _startupEnabled = value;
         _startupLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            enabled
-                ? 'Nexus will start when you sign in.'
-                : 'Nexus startup on login disabled.',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
       setState(() => _startupLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not update startup setting: $e'),
-          backgroundColor: AppTheme.neonPink,
-        ),
+        SnackBar(content: Text('Could not update startup setting: $error')),
       );
     }
   }
 }
 
-// ─── Helper Widgets ───────────────────────────────────────────────────────────
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader({required this.title});
+class _BackgroundGallery extends StatelessWidget {
+  final List<String> paths;
+  final String currentPath;
+  final ValueChanged<String> onRemove;
+
+  const _BackgroundGallery({
+    required this.paths,
+    required this.currentPath,
+    required this.onRemove,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: TextStyle(
-        color: AppTheme.textMuted,
-        fontSize: 10,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 3,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth < 520 ? 140.0 : 180.0;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: paths
+              .map(
+                (path) => _BackgroundThumbnail(
+                  key: ValueKey('background-thumbnail-$path'),
+                  path: path,
+                  width: width,
+                  selected: path == currentPath,
+                  onRemove: () => onRemove(path),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _BackgroundThumbnail extends StatelessWidget {
+  final String path;
+  final double width;
+  final bool selected;
+  final VoidCallback onRemove;
+
+  const _BackgroundThumbnail({
+    super.key,
+    required this.path,
+    required this.width,
+    required this.selected,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: selected ? 'Current background' : 'Background image',
+      child: SizedBox(
+        width: width,
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.outlineVariant,
+                    width: selected ? 2 : 1,
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: Image.file(
+                    File(path),
+                    fit: BoxFit.cover,
+                    cacheWidth: 360,
+                    cacheHeight: 204,
+                    filterQuality: FilterQuality.medium,
+                    errorBuilder: (_, _, _) => ColoredBox(
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      child: const Center(
+                        child: Icon(Icons.broken_image_outlined),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (selected)
+                Positioned(
+                  left: 6,
+                  bottom: 6,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      child: Text(
+                        'CURRENT',
+                        style: TextStyle(color: Colors.white, fontSize: 9),
+                      ),
+                    ),
+                  ),
+                ),
+              Positioned(
+                right: 4,
+                top: 4,
+                child: IconButton.filled(
+                  onPressed: onRemove,
+                  tooltip: 'Remove background',
+                  constraints: const BoxConstraints(
+                    minWidth: 36,
+                    minHeight: 36,
+                  ),
+                  padding: EdgeInsets.zero,
+                  iconSize: 18,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-class _SettingsTextField extends StatelessWidget {
-  final String label;
-  final TextEditingController controller;
-  final bool obscureText;
-  final ValueChanged<String>? onChanged;
-
-  const _SettingsTextField({
-    required this.label,
-    required this.controller,
-    this.obscureText = false,
-    this.onChanged,
-  });
+class _PageHeading extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const _PageHeading(this.title, this.subtitle);
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-        ),
+        Text(title, style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          obscureText: obscureText,
-          onChanged: onChanged,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white.withValues(alpha: 0.05),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(
-                color: Colors.white.withValues(alpha: 0.1),
-              ),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(
-                color: Colors.white.withValues(alpha: 0.1),
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(
-                color: AppTheme.neonBlue.withValues(alpha: 0.5),
-              ),
-            ),
-            isDense: true,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 10,
-            ),
+        Text(
+          subtitle,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ],
-    );
-  }
+    ),
+  );
 }
 
-class _SettingsToggle extends StatelessWidget {
+class _SettingBlock extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget child;
+  const _SettingBlock({
+    required this.title,
+    this.subtitle,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+      if (subtitle != null)
+        Text(
+          subtitle!,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
+        ),
+      const SizedBox(height: 10),
+      child,
+    ],
+  );
+}
+
+class _DebouncedTextField extends StatefulWidget {
   final String label;
+  final TextEditingController controller;
+  final bool obscureText;
+  final Future<void> Function(String) onCommit;
+  const _DebouncedTextField({
+    required this.label,
+    required this.controller,
+    required this.onCommit,
+    this.obscureText = false,
+  });
+
+  @override
+  State<_DebouncedTextField> createState() => _DebouncedTextFieldState();
+}
+
+class _DebouncedTextFieldState extends State<_DebouncedTextField> {
+  Timer? _timer;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _schedule(String value) {
+    _timer?.cancel();
+    _timer = Timer(
+      const Duration(milliseconds: 500),
+      () => widget.onCommit(value.trim()),
+    );
+  }
+
+  void _commit(String value) {
+    _timer?.cancel();
+    widget.onCommit(value.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: widget.controller,
+    obscureText: widget.obscureText,
+    onChanged: _schedule,
+    onSubmitted: _commit,
+    onTapOutside: (_) {
+      _commit(widget.controller.text);
+      FocusManager.instance.primaryFocus?.unfocus();
+    },
+    decoration: InputDecoration(labelText: widget.label),
+  );
+}
+
+class _SwitchSetting extends StatelessWidget {
+  final String title;
   final bool value;
   final ValueChanged<bool>? onChanged;
-
-  const _SettingsToggle({
-    required this.label,
+  const _SwitchSetting({
+    required this.title,
     required this.value,
     required this.onChanged,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-          ),
-        ),
-        Switch(
-          value: value,
-          onChanged: onChanged,
-          activeThumbColor: AppTheme.neonBlue,
-          activeTrackColor: AppTheme.neonBlue.withValues(alpha: 0.3),
-          inactiveThumbColor: AppTheme.textMuted,
-          inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => SwitchListTile(
+    contentPadding: EdgeInsets.zero,
+    title: Text(title),
+    value: value,
+    onChanged: onChanged,
+  );
 }
 
-class _ThemeModePicker extends StatelessWidget {
-  final ThemeModePreference value;
-  final ValueChanged<ThemeModePreference> onChanged;
-
-  const _ThemeModePicker({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: ThemeModePreference.values
-          .map(
-            (mode) => Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  right: mode == ThemeModePreference.values.last ? 0 : 8,
-                ),
-                child: _ThemeModeButton(
-                  label: _label(mode),
-                  selected: mode == value,
-                  onTap: () => onChanged(mode),
-                ),
-              ),
-            ),
-          )
-          .toList(),
-    );
-  }
-
-  String _label(ThemeModePreference mode) {
-    return switch (mode) {
-      ThemeModePreference.system => 'SYSTEM',
-      ThemeModePreference.light => 'LIGHT',
-      ThemeModePreference.dark => 'DARK',
-    };
-  }
-}
-
-class _ThemeModeButton extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _ThemeModeButton({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected
-              ? AppTheme.neonBlue.withValues(alpha: 0.18)
-              : Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? AppTheme.neonBlue.withValues(alpha: 0.55)
-                : Colors.white.withValues(alpha: 0.1),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? AppTheme.neonBlue : AppTheme.textSecondary,
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.4,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _SettingsActionButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: AppTheme.neonBlue, size: 14),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _RotationIntervalPicker extends StatelessWidget {
-  final int value;
-  final ValueChanged<int> onChanged;
-
-  const _RotationIntervalPicker({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          value:
-              DashboardProvider.backgroundRotationMinuteOptions.contains(value)
-              ? value
-              : 2,
-          dropdownColor: AppTheme.darkCard,
-          iconEnabledColor: AppTheme.neonBlue,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-          items: DashboardProvider.backgroundRotationMinuteOptions
-              .map(
-                (minutes) => DropdownMenuItem<int>(
-                  value: minutes,
-                  child: Text('$minutes min'),
-                ),
-              )
-              .toList(),
-          onChanged: (minutes) {
-            if (minutes == null) return;
-            onChanged(minutes);
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsSlider extends StatelessWidget {
+class _CommitSlider extends StatefulWidget {
   final String label;
   final double value;
   final double min;
   final double max;
   final int? divisions;
-  final String displayValue;
-  final ValueChanged<double> onChanged;
-
-  const _SettingsSlider({
+  final String Function(double)? display;
+  final ValueChanged<double> onCommit;
+  const _CommitSlider({
     required this.label,
     required this.value,
     required this.min,
     required this.max,
     this.divisions,
-    required this.displayValue,
-    required this.onChanged,
+    this.display,
+    required this.onCommit,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-              ),
-            ),
-            Text(
-              displayValue,
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
-            ),
-          ],
-        ),
-        Slider(
-          value: value.clamp(min, max),
-          min: min,
-          max: max,
-          divisions: divisions,
-          activeColor: AppTheme.neonBlue,
-          inactiveColor: AppTheme.textMuted.withValues(alpha: 0.25),
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
+  State<_CommitSlider> createState() => _CommitSliderState();
 }
 
-class _WidgetControlRow extends StatelessWidget {
+class _CommitSliderState extends State<_CommitSlider> {
+  late double _value = widget.value;
+  bool _dragging = false;
+
+  @override
+  void didUpdateWidget(_CommitSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_dragging && oldWidget.value != widget.value) _value = widget.value;
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Expanded(child: Text(widget.label)),
+          Text(
+            widget.display?.call(_value) ?? '${(_value * 100).round()}%',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+      Slider(
+        value: _value.clamp(widget.min, widget.max),
+        min: widget.min,
+        max: widget.max,
+        divisions: widget.divisions,
+        onChangeStart: (_) => _dragging = true,
+        onChanged: (value) => setState(() => _value = value),
+        onChangeEnd: (value) {
+          _dragging = false;
+          widget.onCommit(value);
+        },
+      ),
+    ],
+  );
+}
+
+class _WidgetOrderTile extends StatelessWidget {
   final String label;
   final bool enabled;
   final bool canMoveUp;
@@ -950,8 +946,7 @@ class _WidgetControlRow extends StatelessWidget {
   final ValueChanged<bool> onToggle;
   final VoidCallback onMoveUp;
   final VoidCallback onMoveDown;
-
-  const _WidgetControlRow({
+  const _WidgetOrderTile({
     required this.label,
     required this.enabled,
     required this.canMoveUp,
@@ -962,60 +957,68 @@ class _WidgetControlRow extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
+  Widget build(BuildContext context) => Card(
+    margin: const EdgeInsets.only(bottom: 8),
+    child: ListTile(
+      leading: Switch(value: enabled, onChanged: onToggle),
+      title: Text(label),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
+            tooltip: 'Move $label up',
             onPressed: canMoveUp ? onMoveUp : null,
-            icon: Icon(Icons.keyboard_arrow_up, color: AppTheme.textSecondary),
+            icon: const Icon(Icons.keyboard_arrow_up_rounded),
           ),
           IconButton(
+            tooltip: 'Move $label down',
             onPressed: canMoveDown ? onMoveDown : null,
-            icon: Icon(
-              Icons.keyboard_arrow_down,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-            ),
-          ),
-          Switch(
-            value: enabled,
-            onChanged: onToggle,
-            activeThumbColor: AppTheme.neonBlue,
-            activeTrackColor: AppTheme.neonBlue.withValues(alpha: 0.3),
-            inactiveThumbColor: AppTheme.textMuted,
-            inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
 }
 
-class _SettingsRow extends StatelessWidget {
-  final String label;
-  final Widget child;
-
-  const _SettingsRow({required this.label, required this.child});
+class _AccentChoice extends StatelessWidget {
+  final String hex;
+  final bool selected;
+  final VoidCallback onSelected;
+  const _AccentChoice({
+    required this.hex,
+    required this.selected,
+    required this.onSelected,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+    final color = Color(int.parse(hex.replaceFirst('#', '0xFF')));
+    return Semantics(
+      label: 'Accent color $hex',
+      selected: selected,
+      button: true,
+      child: InkWell(
+        onTap: onSelected,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+            border: Border.all(
+              color: selected
+                  ? Theme.of(context).colorScheme.onSurface
+                  : Colors.transparent,
+              width: 3,
+            ),
+          ),
+          child: selected
+              ? const Icon(Icons.check_rounded, color: Colors.white)
+              : null,
         ),
-        const SizedBox(height: 8),
-        child,
-      ],
+      ),
     );
   }
 }

@@ -1,10 +1,10 @@
 // ─── App Shortcut Model ──────────────────────────────────────────────────────
 class AppShortcut {
   final String id;
-  String name;
-  String executablePath;
-  String iconPath; // can be empty, will use default
-  String color; // hex string e.g. "#00D4FF"
+  final String name;
+  final String executablePath;
+  final String iconPath; // can be empty, will use default
+  final String color;
 
   AppShortcut({
     required this.id,
@@ -13,6 +13,19 @@ class AppShortcut {
     this.iconPath = '',
     this.color = '#00D4FF',
   });
+
+  AppShortcut copyWith({
+    String? name,
+    String? executablePath,
+    String? iconPath,
+    String? color,
+  }) => AppShortcut(
+    id: id,
+    name: name ?? this.name,
+    executablePath: executablePath ?? this.executablePath,
+    iconPath: iconPath ?? this.iconPath,
+    color: color ?? this.color,
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -34,10 +47,10 @@ class AppShortcut {
 // ─── Website Shortcut Model ──────────────────────────────────────────────────
 class WebShortcut {
   final String id;
-  String name;
-  String url;
-  String favicon; // URL or empty
-  String color;
+  final String name;
+  final String url;
+  final String favicon; // URL or empty
+  final String color;
 
   WebShortcut({
     required this.id,
@@ -46,6 +59,19 @@ class WebShortcut {
     this.favicon = '',
     this.color = '#7B2FFF',
   });
+
+  WebShortcut copyWith({
+    String? name,
+    String? url,
+    String? favicon,
+    String? color,
+  }) => WebShortcut(
+    id: id,
+    name: name ?? this.name,
+    url: url ?? this.url,
+    favicon: favicon ?? this.favicon,
+    color: color ?? this.color,
+  );
 
   String get domain {
     try {
@@ -78,25 +104,54 @@ class WebShortcut {
   );
 }
 
+enum TodoPriority { none, low, medium, high }
+
 // ─── Todo Model ───────────────────────────────────────────────────────────────
 class TodoItem {
   final String id;
-  String text;
-  bool completed;
-  DateTime createdAt;
+  final String text;
+  final bool completed;
+  final DateTime createdAt;
+  final DateTime? dueAt;
+  final TodoPriority priority;
+  final bool remind;
 
   TodoItem({
     required this.id,
     required this.text,
     this.completed = false,
     DateTime? createdAt,
+    this.dueAt,
+    this.priority = TodoPriority.none,
+    this.remind = false,
   }) : createdAt = createdAt ?? DateTime.now();
+
+  TodoItem copyWith({
+    String? text,
+    bool? completed,
+    DateTime? createdAt,
+    DateTime? dueAt,
+    TodoPriority? priority,
+    bool? remind,
+  }) =>
+      TodoItem(
+        id: id,
+        text: text ?? this.text,
+        completed: completed ?? this.completed,
+        createdAt: createdAt ?? this.createdAt,
+        dueAt: dueAt ?? this.dueAt,
+        priority: priority ?? this.priority,
+        remind: remind ?? this.remind,
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'text': text,
     'completed': completed,
     'createdAt': createdAt.toIso8601String(),
+    'dueAt': dueAt?.toIso8601String(),
+    'priority': priority.name,
+    'remind': remind,
   };
 
   factory TodoItem.fromJson(Map<String, dynamic> json) => TodoItem(
@@ -104,50 +159,153 @@ class TodoItem {
     text: json['text'] ?? '',
     completed: json['completed'] ?? false,
     createdAt: DateTime.tryParse(json['createdAt'] ?? '') ?? DateTime.now(),
+    dueAt: json['dueAt'] != null ? DateTime.tryParse(json['dueAt'] ?? '') : null,
+    priority: TodoPriority.values.firstWhere(
+      (p) => p.name == json['priority'],
+      orElse: () => TodoPriority.none,
+    ),
+    remind: json['remind'] ?? false,
   );
 }
 
+class AgendaEvent {
+  final String id;
+  final String title;
+  final DateTime startsAt;
+  final DateTime? endsAt;
+  final String notes;
+  final bool isAllDay;
+
+  const AgendaEvent({
+    required this.id,
+    required this.title,
+    required this.startsAt,
+    this.endsAt,
+    this.notes = '',
+    this.isAllDay = false,
+  });
+
+  AgendaEvent copyWith({
+    String? title,
+    DateTime? startsAt,
+    DateTime? endsAt,
+    bool clearEndsAt = false,
+    String? notes,
+    bool? isAllDay,
+  }) {
+    return AgendaEvent(
+      id: id,
+      title: title ?? this.title,
+      startsAt: startsAt ?? this.startsAt,
+      endsAt: clearEndsAt ? null : endsAt ?? this.endsAt,
+      notes: notes ?? this.notes,
+      isAllDay: isAllDay ?? this.isAllDay,
+    );
+  }
+
+  String? validate() {
+    if (title.trim().isEmpty) return 'Title is required.';
+    if (endsAt != null && endsAt!.isBefore(startsAt)) {
+      return 'End time must be after the start time.';
+    }
+    if (isAllDay &&
+        (startsAt.hour != 0 || startsAt.minute != 0 || endsAt != null)) {
+      return 'All-day events must use a date without times.';
+    }
+    return null;
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'startsAt': startsAt.toIso8601String(),
+    'endsAt': endsAt?.toIso8601String(),
+    'notes': notes,
+    'isAllDay': isAllDay,
+  };
+
+  factory AgendaEvent.fromJson(Map<String, dynamic> json) {
+    final startsAt = DateTime.tryParse(json['startsAt'] as String? ?? '');
+    if (startsAt == null) throw const FormatException('Invalid event date');
+    final event = AgendaEvent(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      startsAt: startsAt,
+      endsAt: DateTime.tryParse(json['endsAt'] as String? ?? ''),
+      notes: json['notes'] as String? ?? '',
+      isAllDay: json['isAllDay'] as bool? ?? false,
+    );
+    final error = event.validate();
+    if (event.id.isEmpty || error != null) {
+      throw FormatException(error ?? 'Event id is required.');
+    }
+    return event;
+  }
+}
+
 // ─── Dashboard Widget Layout Model ───────────────────────────────────────────
-class DashboardWidgetLayout {
+// ─── Weather Model ───────────────────────────────────────────────────────────
+enum LayoutBreakpoint {
+  medium(6, 'widgetPlacementsMedium'),
+  wide(12, 'widgetPlacementsWide');
+
+  final int columns;
+  final String storageKey;
+  const LayoutBreakpoint(this.columns, this.storageKey);
+}
+
+class DashboardWidgetPlacement {
+  final String id;
   final int x;
   final int y;
   final int width;
   final int height;
 
-  const DashboardWidgetLayout({
+  const DashboardWidgetPlacement({
+    required this.id,
     required this.x,
     required this.y,
     required this.width,
     required this.height,
   });
 
-  DashboardWidgetLayout copyWith({int? x, int? y, int? width, int? height}) {
-    return DashboardWidgetLayout(
-      x: x ?? this.x,
-      y: y ?? this.y,
-      width: width ?? this.width,
-      height: height ?? this.height,
-    );
-  }
+  int get right => x + width;
+  int get bottom => y + height;
+
+  DashboardWidgetPlacement copyWith({
+    int? x,
+    int? y,
+    int? width,
+    int? height,
+  }) => DashboardWidgetPlacement(
+    id: id,
+    x: x ?? this.x,
+    y: y ?? this.y,
+    width: width ?? this.width,
+    height: height ?? this.height,
+  );
 
   Map<String, dynamic> toJson() => {
+    'id': id,
     'x': x,
     'y': y,
     'width': width,
     'height': height,
   };
 
-  factory DashboardWidgetLayout.fromJson(Map<String, dynamic> json) {
-    return DashboardWidgetLayout(
+  factory DashboardWidgetPlacement.fromJson(Map<String, dynamic> json) {
+    final id = json['id'] as String? ?? '';
+    if (id.isEmpty) throw const FormatException('Widget id is required');
+    return DashboardWidgetPlacement(
+      id: id,
       x: (json['x'] as num?)?.toInt() ?? 0,
       y: (json['y'] as num?)?.toInt() ?? 0,
-      width: (json['width'] as num?)?.toInt() ?? 2,
-      height: (json['height'] as num?)?.toInt() ?? 2,
+      width: (json['width'] as num?)?.toInt() ?? 1,
+      height: (json['height'] as num?)?.toInt() ?? 1,
     );
   }
 }
 
-// ─── Weather Model ───────────────────────────────────────────────────────────
 class ForecastDay {
   final DateTime date;
   final double tempMax;
@@ -162,6 +320,22 @@ class ForecastDay {
     required this.icon,
     required this.condition,
   });
+
+  Map<String, dynamic> toJson() => {
+    'date': date.toIso8601String(),
+    'tempMax': tempMax,
+    'tempMin': tempMin,
+    'icon': icon,
+    'condition': condition,
+  };
+
+  factory ForecastDay.fromJson(Map<String, dynamic> json) => ForecastDay(
+    date: DateTime.tryParse(json['date'] ?? '') ?? DateTime.now(),
+    tempMax: (json['tempMax'] as num?)?.toDouble() ?? 0.0,
+    tempMin: (json['tempMin'] as num?)?.toDouble() ?? 0.0,
+    icon: json['icon'] ?? '01d',
+    condition: json['condition'] ?? 'Clear',
+  );
 }
 
 class WeatherData {
@@ -184,6 +358,31 @@ class WeatherData {
     required this.feelsLike,
     this.forecast = const [],
   });
+
+  Map<String, dynamic> toJson() => {
+    'city': city,
+    'temperature': temperature,
+    'condition': condition,
+    'icon': icon,
+    'humidity': humidity,
+    'windSpeed': windSpeed,
+    'feelsLike': feelsLike,
+    'forecast': forecast.map((f) => f.toJson()).toList(),
+  };
+
+  factory WeatherData.fromJson(Map<String, dynamic> json) => WeatherData(
+    city: json['city'] ?? '',
+    temperature: (json['temperature'] as num?)?.toDouble() ?? 0.0,
+    condition: json['condition'] ?? '',
+    icon: json['icon'] ?? '01d',
+    humidity: (json['humidity'] as num?)?.toInt() ?? 0,
+    windSpeed: (json['windSpeed'] as num?)?.toDouble() ?? 0.0,
+    feelsLike: (json['feelsLike'] as num?)?.toDouble() ?? 0.0,
+    forecast: (json['forecast'] as List<dynamic>?)
+            ?.map((f) => ForecastDay.fromJson(f as Map<String, dynamic>))
+            .toList() ??
+        const [],
+  );
 
   factory WeatherData.fromOpenWeather(
     Map<String, dynamic> json, {

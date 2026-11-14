@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../models/models.dart';
 import '../providers/dashboard_provider.dart';
 import '../services/launch_window_service.dart';
@@ -12,14 +13,19 @@ class WebsiteWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dashboard = context.watch<DashboardProvider>();
-    final websites = dashboard.websites;
+    final selected = context
+        .select<DashboardProvider, (List<WebShortcut>, bool)>(
+          (dashboard) => (dashboard.websites, dashboard.isEditMode),
+        );
+    final dashboard = context.read<DashboardProvider>();
+    final websites = selected.$1;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppTheme.glassDecoration(
+        context,
         borderRadius: 20,
-        borderColor: AppTheme.neonPink.withValues(alpha: 0.15),
+        borderColor: AppTheme.accent(context).withValues(alpha: 0.15),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -27,52 +33,29 @@ class WebsiteWidget extends StatelessWidget {
           // Header
           Row(
             children: [
-              Icon(Icons.language_rounded, color: AppTheme.neonPink, size: 14),
+              Icon(
+                Icons.language_rounded,
+                color: AppTheme.accent(context),
+                size: 14,
+              ),
               const SizedBox(width: 8),
-              Text(
-                'WEBSITES',
-                style: TextStyle(
-                  color: AppTheme.neonPink,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 3,
+              Expanded(
+                child: Text(
+                  'WEBSITES',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.accent(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 3,
+                  ),
                 ),
               ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => _showAddDialog(context, dashboard),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.neonPink.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: AppTheme.neonPink.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.add_rounded,
-                        color: AppTheme.neonPink,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'ADD SITE',
-                        style: TextStyle(
-                          color: AppTheme.neonPink,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              TextButton.icon(
+                onPressed: () => _showAddDialog(context, dashboard),
+                icon: const Icon(Icons.add_rounded, size: 16),
+                label: const Text('ADD SITE'),
               ),
             ],
           ),
@@ -85,36 +68,73 @@ class WebsiteWidget extends StatelessWidget {
               : Wrap(
                   spacing: 10,
                   runSpacing: 10,
-                  children: websites
-                      .asMap()
-                      .entries
-                      .map(
-                        (site) => _WebsiteChip(
-                          site: site.value,
-                          isEditMode: dashboard.isEditMode,
-                          onTap: () => _launch(context, site.value.url),
-                          onDelete: () => _confirmDeleteSite(
-                            context,
-                            dashboard,
-                            site.value,
+                  children: websites.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final site = entry.value;
+                    final chipWidget = _WebsiteChip(
+                      site: site,
+                      isEditMode: selected.$2,
+                      onTap: () => _launch(context, site.url),
+                      onDelete: () =>
+                          _confirmDeleteSite(context, dashboard, site),
+                      onEdit: () =>
+                          _showEditDialog(context, dashboard, site),
+                      onMoveUp: index > 0
+                          ? () => dashboard.reorderWebsites(index, index - 1)
+                          : null,
+                      onMoveDown: index < websites.length - 1
+                          ? () => dashboard.reorderWebsites(index, index + 2)
+                          : null,
+                    );
+
+                    if (!selected.$2) {
+                      return chipWidget;
+                    }
+
+                    return DragTarget<int>(
+                      onWillAcceptWithDetails: (details) => details.data != index,
+                      onAcceptWithDetails: (details) {
+                        final fromIndex = details.data;
+                        dashboard.reorderWebsites(
+                          fromIndex,
+                          index > fromIndex ? index + 1 : index,
+                        );
+                      },
+                      builder: (context, candidateData, rejectedData) {
+                        final isHovered = candidateData.isNotEmpty;
+                        return AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            border: isHovered
+                                ? Border.all(
+                                    color: AppTheme.accent(context),
+                                    width: 2,
+                                  )
+                                : null,
                           ),
-                          onEdit: () =>
-                              _showEditDialog(context, dashboard, site.value),
-                          onMoveUp: site.key > 0
-                              ? () => dashboard.reorderWebsites(
-                                  site.key,
-                                  site.key - 1,
-                                )
-                              : null,
-                          onMoveDown: site.key < websites.length - 1
-                              ? () => dashboard.reorderWebsites(
-                                  site.key,
-                                  site.key + 2,
-                                )
-                              : null,
-                        ),
-                      )
-                      .toList(),
+                          child: Draggable<int>(
+                            data: index,
+                            feedback: Material(
+                              color: Colors.transparent,
+                              child: Opacity(
+                                opacity: 0.9,
+                                child: Transform.scale(
+                                  scale: 1.05,
+                                  child: chipWidget,
+                                ),
+                              ),
+                            ),
+                            childWhenDragging: Opacity(
+                              opacity: 0.3,
+                              child: chipWidget,
+                            ),
+                            child: chipWidget,
+                          ),
+                        );
+                      },
+                    );
+                  }).toList(),
                 ),
         ],
       ),
@@ -122,22 +142,36 @@ class WebsiteWidget extends StatelessWidget {
   }
 
   Widget _emptyState(BuildContext context, DashboardProvider dashboard) {
-    return GestureDetector(
+    return InkWell(
       onTap: () => _showAddDialog(context, dashboard),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 20),
         decoration: BoxDecoration(
-          border: Border.all(color: AppTheme.glassBorder),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           children: [
-            Icon(Icons.add_link_rounded, color: AppTheme.textMuted, size: 28),
+            Icon(
+              Icons.add_link_rounded,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+              size: 28,
+            ),
             SizedBox(height: 8),
             Text(
               'Add your first website',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+                fontSize: 13,
+              ),
             ),
           ],
         ),
@@ -220,7 +254,7 @@ class WebsiteWidget extends StatelessWidget {
   }
 }
 
-// ─── Website Chip ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Website Chip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _WebsiteChip extends StatefulWidget {
   final WebShortcut site;
   final bool isEditMode;
@@ -263,8 +297,9 @@ class _WebsiteChipState extends State<_WebsiteChip> {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          GestureDetector(
+          InkWell(
             onTap: widget.isEditMode ? widget.onEdit : widget.onTap,
+            borderRadius: BorderRadius.circular(12),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -278,15 +313,6 @@ class _WebsiteChipState extends State<_WebsiteChip> {
                       ? _color.withValues(alpha: 0.6)
                       : Colors.white.withValues(alpha: 0.1),
                 ),
-                boxShadow: _hovered
-                    ? [
-                        BoxShadow(
-                          color: _color.withValues(alpha: 0.25),
-                          blurRadius: 16,
-                          spreadRadius: -4,
-                        ),
-                      ]
-                    : null,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -320,7 +346,9 @@ class _WebsiteChipState extends State<_WebsiteChip> {
                   Text(
                     widget.site.name,
                     style: TextStyle(
-                      color: _hovered ? _color : AppTheme.textSecondary,
+                      color: _hovered
+                          ? _color
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                     ),
@@ -330,7 +358,8 @@ class _WebsiteChipState extends State<_WebsiteChip> {
                     Icons.open_in_new_rounded,
                     color: _hovered
                         ? _color.withValues(alpha: 0.7)
-                        : AppTheme.textMuted,
+                        : Theme.of(context).colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.72),
                     size: 12,
                   ),
                 ],
@@ -355,21 +384,20 @@ class _WebsiteChipState extends State<_WebsiteChip> {
                       icon: Icons.arrow_downward_rounded,
                       onTap: widget.onMoveDown!,
                     ),
-                  GestureDetector(
-                    onTap: widget.onDelete,
-                    child: Container(
-                      width: 18,
-                      height: 18,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppTheme.neonPink,
-                      ),
-                      child: Icon(
-                        Icons.close_rounded,
-                        color: Colors.white,
-                        size: 12,
-                      ),
+                  IconButton.filled(
+                    onPressed: widget.onDelete,
+                    tooltip: 'Remove ${widget.site.name}',
+                    constraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 36,
                     ),
+                    padding: EdgeInsets.zero,
+                    iconSize: 16,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.error,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.close_rounded),
                   ),
                 ],
               ),
@@ -388,19 +416,13 @@ class _WebsiteEditBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 18,
-        height: 18,
-        margin: const EdgeInsets.only(right: 3),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppTheme.darkCard,
-          border: Border.all(color: AppTheme.glassBorder),
-        ),
-        child: Icon(icon, color: AppTheme.textSecondary, size: 11),
-      ),
+    return IconButton.outlined(
+      onPressed: onTap,
+      tooltip: 'Reorder shortcut',
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      padding: EdgeInsets.zero,
+      iconSize: 16,
+      icon: Icon(icon),
     );
   }
 }
@@ -414,10 +436,10 @@ class _DeleteConfirmDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppTheme.darkCard,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: AppTheme.glassBorder),
+        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       title: Text(
         title,
@@ -430,12 +452,22 @@ class _DeleteConfirmDialog extends StatelessWidget {
       ),
       content: Text(
         message,
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: 13,
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: Text('CANCEL', style: TextStyle(color: AppTheme.textMuted)),
+          child: Text(
+            'CANCEL',
+            style: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+            ),
+          ),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(true),

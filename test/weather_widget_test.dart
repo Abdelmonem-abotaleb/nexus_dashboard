@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexus_dashboard/models/models.dart';
 import 'package:nexus_dashboard/providers/dashboard_provider.dart';
 import 'package:nexus_dashboard/providers/weather_provider.dart';
+import 'package:nexus_dashboard/providers/window_activity_provider.dart';
 import 'package:nexus_dashboard/widgets/weather_widget.dart';
 
 void main() {
@@ -138,6 +139,55 @@ void main() {
 
     expect(weatherProvider.weatherDataReads, greaterThan(readsBefore));
     expect(find.text('°F'), findsOneWidget);
+  });
+
+  testWidgets('pauses while inactive and refreshes once on resume', (
+    tester,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final dashboardProvider = DashboardProvider(prefs);
+    final activityProvider = WindowActivityProvider();
+    var requests = 0;
+    final weatherProvider = WeatherProvider(
+      httpGet: (uri) async {
+        if (uri.host == 'geocoding-api.open-meteo.com') {
+          return http.Response(
+            '{"results":[{"name":"Cairo","latitude":30.0,"longitude":31.0}]}',
+            200,
+          );
+        }
+        requests++;
+        return http.Response(
+          '{"current":{"temperature_2m":24,"relative_humidity_2m":50,"apparent_temperature":24,"weather_code":0,"wind_speed_10m":1},"daily":{"time":[],"temperature_2m_max":[],"temperature_2m_min":[],"weather_code":[]}}',
+          200,
+        );
+      },
+    );
+
+    await dashboardProvider.setWeatherRefreshMinutes(1);
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider.value(value: dashboardProvider),
+          ChangeNotifierProvider.value(value: activityProvider),
+          ChangeNotifierProvider.value(value: weatherProvider),
+        ],
+        child: const MaterialApp(home: WeatherWidget()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(requests, 1);
+
+    activityProvider.setFocused(false);
+    await tester.pump();
+    await tester.pump(const Duration(minutes: 2));
+    expect(requests, 1);
+
+    activityProvider.setFocused(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(requests, 2);
   });
 }
 

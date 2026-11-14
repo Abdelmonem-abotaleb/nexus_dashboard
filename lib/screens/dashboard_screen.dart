@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -8,9 +9,10 @@ import 'package:window_manager/window_manager.dart';
 
 import '../models/models.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/window_activity_provider.dart';
 import '../services/dashboard_grid_service.dart';
-import '../services/power_service.dart';
 import '../services/tray_service.dart';
+import '../services/startup_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/clock_widget.dart';
 import '../widgets/weather_widget.dart';
@@ -22,9 +24,14 @@ import '../widgets/system_stats_widget.dart';
 import '../widgets/settings_panel.dart';
 import '../widgets/particle_background.dart';
 import '../widgets/power_action_widget.dart';
+import '../widgets/agenda_widget.dart';
+import '../widgets/command_palette.dart';
+import '../widgets/desktop_widget_view.dart';
+import '../services/hotkey_service.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final StartupService? startupService;
+  const DashboardScreen({super.key, this.startupService});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -33,19 +40,21 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin, WindowListener {
   static const double _gridGap = 16;
-  static const double _gridCellHeight = 112;
-
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   final FocusNode _focusNode = FocusNode();
   Timer? _startupFocusTimer;
   Timer? _backgroundRotationTimer;
+  Timer? _boundsSaveTimer;
   DashboardProvider? _dashboardProvider;
   String _lastWindowSignature = '';
   String _lastBackgroundRotationSignature = '';
   String _lastDashboardSettingsSignature = '';
+  bool? _lastAppliedWidgetMode;
+  bool _isApplyingWindowMode = false;
   bool _pendingWindowUpdate = false;
   bool _settingsOpen = false;
+  bool _commandPaletteOpen = false;
   bool _fullscreenTopBarVisible = false;
   bool _visualEffectsActive = true;
 
@@ -53,6 +62,15 @@ class _DashboardScreenState extends State<DashboardScreen>
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    TrayService.instance.visibleNotifier.addListener(_handleTrayVisibility);
+    TrayService.instance.onToggleWidgetMode = _toggleWidgetModeFromTray;
+    HotkeyService.instance.initialize(
+      onAction: () {
+        if (mounted) {
+          setState(() => _commandPaletteOpen = true);
+        }
+      },
+    );
 
     _fadeController = AnimationController(
       vsync: this,
@@ -90,26 +108,28 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     windowManager.removeListener(this);
+    TrayService.instance.visibleNotifier.removeListener(_handleTrayVisibility);
+    if (TrayService.instance.onToggleWidgetMode == _toggleWidgetModeFromTray) {
+      TrayService.instance.onToggleWidgetMode = null;
+    }
     _dashboardProvider?.removeListener(_handleDashboardProviderChange);
     _fadeController.dispose();
     _startupFocusTimer?.cancel();
     _backgroundRotationTimer?.cancel();
+    _boundsSaveTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final dashboard = context.watch<DashboardProvider>();
+    context.select<DashboardProvider, int>(
+      (dashboard) => dashboard.layoutRevision,
+    );
+    final dashboard = context.read<DashboardProvider>();
     final size = MediaQuery.of(context).size;
-    final platformDarkMode =
-        MediaQuery.platformBrightnessOf(context) == Brightness.dark;
     final fullscreenTakeover =
         dashboard.takeoverMode && dashboard.fullscreenEnabled;
-    AppTheme.useDarkMode = dashboard.resolveUseDarkMode(
-      platformDarkMode: platformDarkMode,
-    );
-    AppTheme.glassIntensity = dashboard.glassIntensity;
 
     return KeyboardListener(
       focusNode: _focusNode,
@@ -119,20 +139,29 @@ class _DashboardScreenState extends State<DashboardScreen>
         backgroundColor: Colors.transparent,
         body: Stack(
           children: [
-            // ── Background ──────────────────────────────────────────────────
+            // Ã¢â€â‚¬Ã¢â€â‚¬ Background Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             _buildBackground(dashboard),
 
-            // ── Particle effect ──────────────────────────────────────────────
+            // Ã¢â€â‚¬Ã¢â€â‚¬ Particle effect Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             if (shouldRenderParticles(
               lowResourceMode: dashboard.lowResourceMode,
+              hasBackgroundImage: _activeBackgroundImagePath(
+                dashboard,
+              ).isNotEmpty,
             ))
               ParticleBackground(active: _visualEffectsActive),
 
-            // ── Main content ─────────────────────────────────────────────────
+            // Ã¢â€â‚¬Ã¢â€â‚¬ Main content Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             FadeTransition(
               opacity: _fadeAnimation,
               child: SafeArea(
-                child: fullscreenTakeover
+                child: dashboard.desktopWidgetMode
+                    ? DesktopWidgetView(
+                        buildWidget: _buildDashboardWidget,
+                        onOpenSettings: () =>
+                            setState(() => _settingsOpen = true),
+                      )
+                    : fullscreenTakeover
                     ? _buildFullscreenContent(context, dashboard, size)
                     : Column(
                         children: [
@@ -152,28 +181,59 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
             ),
 
-            // ── Settings panel overlay ───────────────────────────────────────
+            // Ã¢â€â‚¬Ã¢â€â‚¬ Settings panel overlay Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             if (_settingsOpen)
-              GestureDetector(
-                onTap: () => setState(() => _settingsOpen = false),
-                child: Container(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(
-                      sigmaX: dashboard.blurStrength,
-                      sigmaY: dashboard.blurStrength,
+              Semantics(
+                button: true,
+                label: 'Close settings',
+                child: InkWell(
+                  onTap: () => setState(() => _settingsOpen = false),
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(
+                        sigmaX: dashboard.blurStrength,
+                        sigmaY: dashboard.blurStrength,
+                      ),
+                      child: Container(color: Colors.transparent),
                     ),
-                    child: Container(color: Colors.transparent),
                   ),
                 ),
               ),
             if (_settingsOpen)
-              Positioned(
-                right: 0,
-                top: 0,
-                bottom: 0,
-                child: SettingsPanel(
-                  onClose: () => setState(() => _settingsOpen = false),
+              Positioned.fill(
+                child: Center(
+                  child: SettingsPanel(
+                    startupService: widget.startupService,
+                    onClose: () => setState(() => _settingsOpen = false),
+                  ),
+                ),
+              ),
+
+            // ── Command Palette overlay ───────────────────────────────────────
+            if (_commandPaletteOpen)
+              Semantics(
+                button: true,
+                label: 'Close command palette',
+                child: InkWell(
+                  onTap: () => setState(() => _commandPaletteOpen = false),
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(
+                        sigmaX: dashboard.blurStrength,
+                        sigmaY: dashboard.blurStrength,
+                      ),
+                      child: Container(color: Colors.transparent),
+                    ),
+                  ),
+                ),
+              ),
+            if (_commandPaletteOpen)
+              Positioned.fill(
+                child: CommandPalette(
+                  onClose: () => setState(() => _commandPaletteOpen = false),
+                  onOpenSettings: () => setState(() => _settingsOpen = true),
                 ),
               ),
           ],
@@ -185,6 +245,34 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _handleKeyEvent(KeyEvent event, DashboardProvider dashboard) {
     if (event is! KeyDownEvent) return;
     final keyboard = HardwareKeyboard.instance;
+    if (event.logicalKey == LogicalKeyboardKey.escape && _commandPaletteOpen) {
+      setState(() => _commandPaletteOpen = false);
+      return;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape && _settingsOpen) {
+      setState(() => _settingsOpen = false);
+      return;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape && dashboard.isEditMode) {
+      dashboard.toggleEditMode();
+      return;
+    }
+    if ((event.logicalKey == LogicalKeyboardKey.keyK && keyboard.isControlPressed) ||
+        (event.logicalKey == LogicalKeyboardKey.space && (keyboard.isControlPressed || keyboard.isAltPressed))) {
+      setState(() => _commandPaletteOpen = !_commandPaletteOpen);
+      return;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.comma &&
+        keyboard.isControlPressed) {
+      setState(() => _settingsOpen = true);
+      return;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyW &&
+        keyboard.isControlPressed &&
+        keyboard.isAltPressed) {
+      dashboard.toggleDesktopWidgetMode();
+      return;
+    }
     if (event.logicalKey == LogicalKeyboardKey.keyN &&
         keyboard.isControlPressed &&
         keyboard.isAltPressed) {
@@ -196,8 +284,18 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  void _toggleWidgetModeFromTray() {
+    if (!mounted) return;
+    context.read<DashboardProvider>().toggleDesktopWidgetMode();
+  }
+
   Future<void> _applyWindowSettings(DashboardProvider dashboard) async {
     final signature = [
+      dashboard.desktopWidgetMode,
+      dashboard.desktopWidgetAlwaysOnTop,
+      dashboard.desktopWidgetHideFromTaskbar,
+      dashboard.desktopWidgetLockPosition,
+      dashboard.desktopWidgetOpacity,
       dashboard.takeoverMode,
       dashboard.fullscreenEnabled,
       dashboard.alwaysOnTop,
@@ -209,9 +307,72 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (_lastWindowSignature == signature) return;
     _lastWindowSignature = signature;
 
+    final previousMode = _lastAppliedWidgetMode;
+    final enteringWidgetMode =
+        previousMode != null && !previousMode && dashboard.desktopWidgetMode;
+    final exitingWidgetMode =
+        previousMode != null && previousMode && !dashboard.desktopWidgetMode;
+    _lastAppliedWidgetMode = dashboard.desktopWidgetMode;
+
+    if (enteringWidgetMode) {
+      _isApplyingWindowMode = true;
+      try {
+        final isFull = await windowManager.isFullScreen();
+        final isMax = await windowManager.isMaximized();
+        if (!isFull && !isMax) {
+          final bounds = await windowManager.getBounds();
+          await dashboard.saveDashboardWindowBounds(bounds);
+        }
+        if (isFull) await windowManager.setFullScreen(false);
+        if (isMax) await windowManager.unmaximize();
+        await windowManager.setMinimumSize(const Size(280, 220));
+        final widgetBounds = dashboard.desktopWidgetWindowBounds;
+        if (widgetBounds != null) {
+          await windowManager.setBounds(widgetBounds);
+        } else {
+          await windowManager.setSize(const Size(380, 640));
+          await windowManager.center();
+        }
+      } finally {
+        _isApplyingWindowMode = false;
+      }
+    } else if (exitingWidgetMode) {
+      _isApplyingWindowMode = true;
+      try {
+        final bounds = await windowManager.getBounds();
+        await dashboard.saveDesktopWidgetWindowBounds(bounds);
+        await windowManager.setResizable(true);
+        await windowManager.setMinimumSize(const Size(1024, 700));
+        final dashBounds = dashboard.dashboardWindowBounds;
+        if (dashBounds != null) {
+          await windowManager.setBounds(dashBounds);
+        } else {
+          await windowManager.setSize(const Size(1440, 900));
+          await windowManager.center();
+        }
+      } finally {
+        _isApplyingWindowMode = false;
+      }
+    }
+
+    if (dashboard.desktopWidgetMode) {
+      await windowManager.setOpacity(dashboard.desktopWidgetOpacity);
+      await windowManager.setAlwaysOnTop(dashboard.desktopWidgetAlwaysOnTop);
+      await windowManager.setSkipTaskbar(dashboard.desktopWidgetHideFromTaskbar);
+      await windowManager.setFullScreen(false);
+      await windowManager.setPreventClose(true);
+      await windowManager.setClosable(true);
+      await windowManager.setMinimizable(true);
+      await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+      await windowManager.setResizable(!dashboard.desktopWidgetLockPosition);
+      await windowManager.show();
+      return;
+    }
+
     final takeover = dashboard.takeoverMode;
     final fullscreenTakeover = takeover && dashboard.fullscreenEnabled;
     final protected = takeover && dashboard.protectWindowControls;
+    await windowManager.setResizable(true);
     await windowManager.setOpacity(dashboard.windowOpacity);
     await windowManager.setAlwaysOnTop(
       fullscreenTakeover && dashboard.alwaysOnTop,
@@ -247,6 +408,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   String _dashboardSettingsSignature(DashboardProvider dashboard) {
     return [
+      dashboard.desktopWidgetMode,
+      dashboard.desktopWidgetAlwaysOnTop,
+      dashboard.desktopWidgetHideFromTaskbar,
+      dashboard.desktopWidgetLockPosition,
+      dashboard.desktopWidgetOpacity,
       dashboard.takeoverMode,
       dashboard.fullscreenEnabled,
       dashboard.alwaysOnTop,
@@ -273,7 +439,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _configureBackgroundRotation(DashboardProvider dashboard) {
     final validPaths = dashboard.validBackgroundImagePaths;
+    final active = context.read<WindowActivityProvider>().isActive;
     final signature = [
+      active,
       dashboard.backgroundRotationMinutes,
       ...validPaths,
     ].join('|');
@@ -281,7 +449,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _lastBackgroundRotationSignature = signature;
     _backgroundRotationTimer?.cancel();
     _backgroundRotationTimer = null;
-    if (validPaths.length < 2) return;
+    if (!active || validPaths.length < 2) return;
 
     _backgroundRotationTimer = Timer.periodic(
       Duration(minutes: dashboard.backgroundRotationMinutes),
@@ -290,6 +458,22 @@ class _DashboardScreenState extends State<DashboardScreen>
         context.read<DashboardProvider>().advanceBackgroundImage();
       },
     );
+  }
+
+  void _handleTrayVisibility() {
+    final visible = TrayService.instance.isVisible;
+    _setActivity(visible: visible, focused: visible ? null : false);
+  }
+
+  void _setActivity({bool? visible, bool? focused}) {
+    if (!mounted) return;
+    final activity = context.read<WindowActivityProvider>();
+    if (visible != null) activity.setVisible(visible);
+    if (focused != null) activity.setFocused(focused);
+    final active = activity.isActive;
+    setState(() => _visualEffectsActive = active);
+    _lastBackgroundRotationSignature = '';
+    _configureBackgroundRotation(context.read<DashboardProvider>());
   }
 
   @override
@@ -304,17 +488,13 @@ class _DashboardScreenState extends State<DashboardScreen>
       await _bringToFront();
       return;
     }
-    if (mounted) {
-      setState(() => _visualEffectsActive = false);
-    }
+    _setActivity(visible: false, focused: false);
     await TrayService.instance.hideWindow();
   }
 
   @override
   void onWindowMinimize() async {
-    if (mounted) {
-      setState(() => _visualEffectsActive = false);
-    }
+    _setActivity(visible: false, focused: false);
     final dashboard = context.read<DashboardProvider>();
     if (dashboard.takeoverMode && dashboard.protectWindowControls) {
       await windowManager.restore();
@@ -324,11 +504,49 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   void onWindowRestore() async {
-    if (mounted) {
-      setState(() => _visualEffectsActive = true);
-    }
+    _setActivity(visible: true, focused: true);
     _lastWindowSignature = '';
     await _applyWindowSettings(context.read<DashboardProvider>());
+  }
+
+  @override
+  void onWindowFocus() {
+    _setActivity(visible: true, focused: true);
+  }
+
+  @override
+  void onWindowBlur() {
+    _setActivity(focused: false);
+  }
+
+  @override
+  void onWindowMoved() {
+    _scheduleBoundsSave();
+  }
+
+  @override
+  void onWindowResized() {
+    _scheduleBoundsSave();
+  }
+
+  void _scheduleBoundsSave() {
+    if (_isApplyingWindowMode || !mounted) return;
+    _boundsSaveTimer?.cancel();
+    _boundsSaveTimer = Timer(const Duration(milliseconds: 300), () async {
+      if (!mounted || _isApplyingWindowMode) return;
+      final isFull = await windowManager.isFullScreen();
+      final isMax = await windowManager.isMaximized();
+      final isMin = await windowManager.isMinimized();
+      if (isFull || isMax || isMin || !mounted) return;
+      final bounds = await windowManager.getBounds();
+      if (!mounted) return;
+      final dashboard = context.read<DashboardProvider>();
+      if (dashboard.desktopWidgetMode) {
+        await dashboard.saveDesktopWidgetWindowBounds(bounds);
+      } else {
+        await dashboard.saveDashboardWindowBounds(bounds);
+      }
+    });
   }
 
   Widget _buildBackground(DashboardProvider dashboard) {
@@ -364,12 +582,30 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildImageBackground(String path, double backgroundDim) {
+    final media = MediaQuery.of(context);
+    final cacheWidth = (media.size.width * media.devicePixelRatio)
+        .round()
+        .clamp(1024, 4096);
+    final cacheHeight = (media.size.height * media.devicePixelRatio)
+        .round()
+        .clamp(700, 2304);
     return Stack(
       key: ValueKey('background-image-$path'),
       fit: StackFit.expand,
       children: [
-        Image.file(File(path), fit: BoxFit.cover),
-        Container(color: AppTheme.darkBase.withValues(alpha: backgroundDim)),
+        Image.file(
+          File(path),
+          fit: BoxFit.cover,
+          cacheWidth: cacheWidth,
+          cacheHeight: cacheHeight,
+          filterQuality: FilterQuality.medium,
+          gaplessPlayback: true,
+        ),
+        Container(
+          color: Theme.of(
+            context,
+          ).colorScheme.surface.withValues(alpha: backgroundDim),
+        ),
       ],
     );
   }
@@ -378,50 +614,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     // Default gradient background
     return DecoratedBox(
       key: const ValueKey('default-background'),
-      decoration: BoxDecoration(gradient: AppTheme.backgroundGradient),
-      child: Stack(
-        children: [
-          // Subtle radial glows
-          Positioned(
-            top: -200,
-            left: -100,
-            child: RepaintBoundary(
-              child: Container(
-                width: 600,
-                height: 600,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      AppTheme.neonBlue.withValues(alpha: 0.08),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -150,
-            right: -100,
-            child: RepaintBoundary(
-              child: Container(
-                width: 500,
-                height: 500,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      AppTheme.neonPurple.withValues(alpha: 0.08),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(gradient: AppTheme.backgroundGradient(context)),
     );
   }
 
@@ -440,19 +633,24 @@ class _DashboardScreenState extends State<DashboardScreen>
                     Image.asset(
                       'assets/icons/logo.png',
                       height: 32,
+                      cacheWidth: 64,
                       fit: BoxFit.contain,
                     ),
                     const SizedBox(width: 16),
                     Icon(
                       Icons.open_with_rounded,
-                      color: AppTheme.textMuted,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                       size: 14,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       'DRAG',
                       style: TextStyle(
-                        color: AppTheme.textMuted,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 1.2,
@@ -466,17 +664,37 @@ class _DashboardScreenState extends State<DashboardScreen>
 
           const SizedBox(width: 12),
 
-          // Edit mode toggle
+          // Desktop widget mode
+          _TopBarButton(
+            icon: Icons.picture_in_picture_alt_rounded,
+            label: 'WIDGET',
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            onTap: () => dashboard.setDesktopWidgetMode(true),
+          ),
+
+          const SizedBox(width: 8),
+
+          // Dashboard customization
           _TopBarButton(
             icon: dashboard.isEditMode
                 ? Icons.check_rounded
-                : Icons.tune_rounded,
-            label: dashboard.isEditMode ? 'DONE' : 'EDIT',
+                : Icons.dashboard_customize_outlined,
+            label: dashboard.isEditMode ? 'DONE' : 'CUSTOMIZE',
             color: dashboard.isEditMode
-                ? AppTheme.neonGreen
-                : AppTheme.textSecondary,
-            onTap: () => dashboard.toggleEditMode(),
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+            onTap: () => _toggleCustomizeMode(dashboard),
           ),
+
+          if (dashboard.isEditMode) ...[
+            const SizedBox(width: 8),
+            _TopBarButton(
+              icon: Icons.restart_alt_rounded,
+              label: 'RESET',
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              onTap: () => _confirmResetLayout(dashboard),
+            ),
+          ],
 
           const SizedBox(width: 8),
 
@@ -484,7 +702,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           _TopBarButton(
             icon: Icons.settings_outlined,
             label: 'SETTINGS',
-            color: AppTheme.textSecondary,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             onTap: () => setState(() => _settingsOpen = true),
           ),
 
@@ -495,6 +713,52 @@ class _DashboardScreenState extends State<DashboardScreen>
         ],
       ),
     );
+  }
+
+  void _toggleCustomizeMode(DashboardProvider dashboard) {
+    if (dashboard.isEditMode) {
+      dashboard.toggleEditMode();
+      return;
+    }
+    final contentWidth = MediaQuery.sizeOf(context).width - 48;
+    if (_gridColumnCount(contentWidth) == 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Customize widgets at a window width of 1024 px or more.',
+          ),
+        ),
+      );
+      return;
+    }
+    dashboard.toggleEditMode();
+  }
+
+  Future<void> _confirmResetLayout(DashboardProvider dashboard) async {
+    final breakpoint = _breakpointForWidth(
+      MediaQuery.sizeOf(context).width - 48,
+    );
+    if (breakpoint == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset this layout?'),
+        content: Text(
+          'Restore the default ${breakpoint == LayoutBreakpoint.wide ? 'wide' : 'medium'} widget arrangement?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reset layout'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await dashboard.resetWidgetPlacements(breakpoint);
   }
 
   Widget _buildFullscreenContent(
@@ -539,9 +803,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: AppTheme.darkCard.withValues(alpha: 0.72),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHigh.withValues(alpha: 0.72),
                     border: Border(
-                      bottom: BorderSide(color: AppTheme.glassBorder),
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
                     ),
                   ),
                   child: _buildTopBar(context, dashboard),
@@ -562,62 +830,113 @@ class _DashboardScreenState extends State<DashboardScreen>
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = _gridColumnCount(constraints.maxWidth);
-        final cellWidth =
-            (constraints.maxWidth - (_gridGap * (columns - 1))) / columns;
-        final widgets = dashboard.visibleWidgetOrder
-            .map(
-              (id) => (
-                id: id,
-                layout: _layoutForGrid(dashboard.widgetLayout(id), columns),
-                child: _buildDashboardWidget(id),
-              ),
-            )
-            .where((entry) => entry.child != null)
+        if (columns == 1) {
+          final unit = constraints.maxWidth;
+          final cards = dashboard.visibleWidgetOrder
+              .map((id) => (id: id, child: _buildDashboardWidget(id)))
+              .where((entry) => entry.child != null)
+              .toList();
+          return SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (dashboard.isEditMode)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: MaterialBanner(
+                      content: Text(
+                        'Widget customization is available at 1024 px and wider.',
+                      ),
+                      actions: [SizedBox.shrink()],
+                    ),
+                  ),
+                Wrap(
+                  runSpacing: _gridGap,
+                  children: cards.map((entry) {
+                    final spec = _structuredSpec(entry.id, columns);
+                    return SizedBox(
+                      key: ValueKey('dashboard-${entry.id}'),
+                      width: unit,
+                      height: spec.height,
+                      child: entry.child!,
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          );
+        }
+
+        const rowHeight = 120.0;
+        final breakpoint = columns == 12
+            ? LayoutBreakpoint.wide
+            : LayoutBreakpoint.medium;
+        final unit = columns == 1
+            ? constraints.maxWidth
+            : (constraints.maxWidth - (_gridGap * (columns - 1))) / columns;
+        final placements = dashboard
+            .placementsFor(breakpoint)
+            .where((item) => dashboard.isWidgetEnabled(item.id))
             .toList();
-        final gridHeight = widgets.fold<double>(constraints.maxHeight, (
-          height,
-          entry,
-        ) {
-          final bottom =
-              entry.layout.y * (_gridCellHeight + _gridGap) +
-              entry.layout.height * _gridCellHeight +
-              (entry.layout.height - 1) * _gridGap;
-          return bottom > height ? bottom : height;
-        });
+        final gridHeight = placements.isEmpty
+            ? constraints.maxHeight
+            : placements
+                  .map(
+                    (item) =>
+                        item.y * (rowHeight + _gridGap) +
+                        item.height * rowHeight +
+                        (item.height - 1) * _gridGap,
+                  )
+                  .reduce((a, b) => a > b ? a : b)
+                  .clamp(constraints.maxHeight, double.infinity);
 
         return SingleChildScrollView(
           child: SizedBox(
             height: gridHeight,
             child: Stack(
-              children: widgets.map((entry) {
-                final layout = entry.layout;
-                final left = layout.x * (cellWidth + _gridGap);
-                final top = layout.y * (_gridCellHeight + _gridGap);
-                final width =
-                    layout.width * cellWidth + (layout.width - 1) * _gridGap;
-                final height =
-                    layout.height * _gridCellHeight +
-                    (layout.height - 1) * _gridGap;
-
-                return Positioned(
-                  left: left,
-                  top: top,
-                  width: width,
-                  height: height,
-                  child: _EditableDashboardWidget(
-                    id: entry.id,
-                    layout: layout,
-                    columns: columns,
-                    cellWidth: cellWidth,
-                    cellHeight: _gridCellHeight,
-                    gap: _gridGap,
-                    editMode: dashboard.isEditMode,
-                    onLayoutChanged: (updated) =>
-                        dashboard.setWidgetLayout(entry.id, updated),
-                    child: entry.child!,
+              children: [
+                if (dashboard.isEditMode)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _DashboardGridPainter(
+                          columns: columns,
+                          cellWidth: unit,
+                          rowHeight: rowHeight,
+                          gap: _gridGap,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
                   ),
-                );
-              }).toList(),
+                ...placements.map((placement) {
+                  final child = _buildDashboardWidget(placement.id);
+                  if (child == null) return const SizedBox.shrink();
+                  final width =
+                      placement.width * unit + (placement.width - 1) * _gridGap;
+                  final height =
+                      placement.height * rowHeight +
+                      (placement.height - 1) * _gridGap;
+                  return Positioned(
+                    key: ValueKey('dashboard-${placement.id}'),
+                    left: placement.x * (unit + _gridGap),
+                    top: placement.y * (rowHeight + _gridGap),
+                    width: width,
+                    height: height,
+                    child: _EditableGridItem(
+                      placement: placement,
+                      breakpoint: breakpoint,
+                      cellWidth: unit,
+                      rowHeight: rowHeight,
+                      gap: _gridGap,
+                      editMode: dashboard.isEditMode,
+                      onCommit: (updated) =>
+                          dashboard.updateWidgetPlacement(breakpoint, updated),
+                      child: child,
+                    ),
+                  );
+                }),
+              ],
             ),
           ),
         );
@@ -626,23 +945,46 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   int _gridColumnCount(double width) {
-    if (width < 520) return 2;
-    if (width < 860) return 4;
-    if (width < 1180) return 6;
+    // The dashboard itself has 48 px of horizontal shell padding.
+    if (width < 960) return 1;
+    if (width < 1232) return 6;
     return 12;
   }
 
-  DashboardWidgetLayout _layoutForGrid(
-    DashboardWidgetLayout layout,
-    int columns,
-  ) {
-    final width = layout.width.clamp(1, columns);
-    return layout.copyWith(
-      x: layout.x.clamp(0, columns - width),
-      width: width,
-      y: layout.y.clamp(0, 60),
-      height: layout.height.clamp(1, 12),
-    );
+  LayoutBreakpoint? _breakpointForWidth(double width) {
+    final columns = _gridColumnCount(width);
+    return switch (columns) {
+      12 => LayoutBreakpoint.wide,
+      6 => LayoutBreakpoint.medium,
+      _ => null,
+    };
+  }
+
+  ({int columns, double height}) _structuredSpec(String id, int columns) {
+    if (columns == 1) {
+      return (
+        columns: 1,
+        height: switch (id) {
+          'weather' => 380,
+          'apps' || 'todos' => 340,
+          'websites' => 220,
+          _ => 280,
+        },
+      );
+    }
+    final wide = columns == 12;
+    return switch (id) {
+      'clock' => (columns: 3, height: 380),
+      'weather' => (columns: 3, height: 380),
+      'agenda' => (columns: wide ? 6 : 6, height: 380),
+      'apps' => (columns: wide ? 8 : 6, height: 340),
+      'todos' => (columns: wide ? 4 : 3, height: 340),
+      'prayerTimes' => (columns: wide ? 4 : 3, height: 250),
+      'system' => (columns: wide ? 4 : 3, height: 250),
+      'power' => (columns: wide ? 4 : 3, height: 250),
+      'websites' => (columns: columns, height: 220),
+      _ => (columns: columns, height: 260),
+    };
   }
 
   Widget? _buildDashboardWidget(String id) {
@@ -651,6 +993,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         return const ClockWidget();
       case 'weather':
         return const WeatherWidget();
+      case 'agenda':
+        return const AgendaWidget();
       case 'prayerTimes':
         return const PrayerTimesWidget();
       case 'system':
@@ -661,240 +1005,14 @@ class _DashboardScreenState extends State<DashboardScreen>
         return const WebsiteWidget();
       case 'todos':
         return const TodoWidget();
-      case 'shutdown':
-        return const PowerActionWidget(action: PowerAction.shutdown);
-      case 'restart':
-        return const PowerActionWidget(action: PowerAction.restart);
-      case 'sleep':
-        return const PowerActionWidget(action: PowerAction.sleep);
+      case 'power':
+        return const PowerActionsWidget();
       default:
         return null;
     }
   }
 }
 
-class _EditableDashboardWidget extends StatefulWidget {
-  final String id;
-  final DashboardWidgetLayout layout;
-  final int columns;
-  final double cellWidth;
-  final double cellHeight;
-  final double gap;
-  final bool editMode;
-  final ValueChanged<DashboardWidgetLayout> onLayoutChanged;
-  final Widget child;
-
-  const _EditableDashboardWidget({
-    required this.id,
-    required this.layout,
-    required this.columns,
-    required this.cellWidth,
-    required this.cellHeight,
-    required this.gap,
-    required this.editMode,
-    required this.onLayoutChanged,
-    required this.child,
-  });
-
-  @override
-  State<_EditableDashboardWidget> createState() =>
-      _EditableDashboardWidgetState();
-}
-
-class _EditableDashboardWidgetState extends State<_EditableDashboardWidget> {
-  Offset _dragOffset = Offset.zero;
-  Offset _resizeOffset = Offset.zero;
-
-  @override
-  void didUpdateWidget(_EditableDashboardWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.layout != widget.layout) {
-      _dragOffset = Offset.zero;
-      _resizeOffset = Offset.zero;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: _dragOffset,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final previewWidth = clampPreviewDelta(
-            constraints.maxWidth + _resizeOffset.dx,
-            widget.cellWidth,
-            constraints.maxWidth +
-                (widget.columns * (widget.cellWidth + widget.gap)),
-          );
-          final previewHeight = clampPreviewDelta(
-            constraints.maxHeight + _resizeOffset.dy,
-            widget.cellHeight,
-            constraints.maxHeight + (12 * (widget.cellHeight + widget.gap)),
-          );
-
-          return OverflowBox(
-            alignment: Alignment.topLeft,
-            minWidth: 0,
-            minHeight: 0,
-            maxWidth: double.infinity,
-            maxHeight: double.infinity,
-            child: SizedBox(
-              width: previewWidth,
-              height: previewHeight,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Positioned.fill(child: widget.child),
-                  if (widget.editMode) ...[
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: AppTheme.neonBlue.withValues(alpha: 0.55),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 8,
-                      left: 8,
-                      child: _EditHandle(
-                        icon: Icons.open_with_rounded,
-                        tooltip: 'Move',
-                        cursor: SystemMouseCursors.move,
-                        onPanUpdate: (details) =>
-                            setState(() => _dragOffset += details.delta),
-                        onPanEnd: (_) => _commitDrag(),
-                      ),
-                    ),
-                    Positioned(
-                      right: 8,
-                      bottom: 8,
-                      child: _EditHandle(
-                        icon: Icons.aspect_ratio_rounded,
-                        tooltip: 'Resize',
-                        cursor: SystemMouseCursors.resizeDownRight,
-                        onPanUpdate: (details) =>
-                            setState(() => _resizeOffset += details.delta),
-                        onPanEnd: (_) => _commitResize(),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _commitDrag() {
-    final deltaX = snapDragDeltaToGrid(
-      _dragOffset.dx,
-      widget.cellWidth + widget.gap,
-    );
-    final deltaY = snapDragDeltaToGrid(
-      _dragOffset.dy,
-      widget.cellHeight + widget.gap,
-    );
-    setState(() => _dragOffset = Offset.zero);
-    if (deltaX == 0 && deltaY == 0) return;
-    widget.onLayoutChanged(
-      _clampLayout(
-        widget.layout.copyWith(
-          x: widget.layout.x + deltaX,
-          y: widget.layout.y + deltaY,
-        ),
-      ),
-    );
-  }
-
-  void _commitResize() {
-    final deltaWidth = snapDragDeltaToGrid(
-      _resizeOffset.dx,
-      widget.cellWidth + widget.gap,
-    );
-    final deltaHeight = snapDragDeltaToGrid(
-      _resizeOffset.dy,
-      widget.cellHeight + widget.gap,
-    );
-    setState(() => _resizeOffset = Offset.zero);
-    if (deltaWidth == 0 && deltaHeight == 0) return;
-    widget.onLayoutChanged(
-      _clampLayout(
-        widget.layout.copyWith(
-          width: widget.layout.width + deltaWidth,
-          height: widget.layout.height + deltaHeight,
-        ),
-      ),
-    );
-  }
-
-  DashboardWidgetLayout _clampLayout(DashboardWidgetLayout layout) {
-    final isPowerAction =
-        widget.id == 'shutdown' ||
-        widget.id == 'restart' ||
-        widget.id == 'sleep';
-    final minHeight = isPowerAction ? 1 : 2;
-    final minWidth = isPowerAction ? 1 : 2;
-    final width = layout.width.clamp(minWidth, widget.columns);
-    return layout.copyWith(
-      x: layout.x.clamp(0, widget.columns - width),
-      y: layout.y.clamp(0, 60),
-      width: width,
-      height: layout.height.clamp(minHeight, 12),
-    );
-  }
-}
-
-class _EditHandle extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final MouseCursor cursor;
-  final GestureDragUpdateCallback onPanUpdate;
-  final GestureDragEndCallback onPanEnd;
-
-  const _EditHandle({
-    required this.icon,
-    required this.tooltip,
-    required this.cursor,
-    required this.onPanUpdate,
-    required this.onPanEnd,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      waitDuration: const Duration(milliseconds: 250),
-      child: MouseRegion(
-        cursor: cursor,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onPanUpdate: onPanUpdate,
-          onPanEnd: onPanEnd,
-          child: Container(
-            width: 44,
-            height: 44,
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: AppTheme.darkCard.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.glassBorder),
-            ),
-            child: Icon(icon, color: AppTheme.neonBlue, size: 18),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Top Bar Button ───────────────────────────────────────────────────────────
 class _TopBarButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -935,7 +1053,320 @@ class _TopBarButton extends StatelessWidget {
   }
 }
 
-// ─── Window Controls ──────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Window Controls Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+class _EditableGridItem extends StatefulWidget {
+  final DashboardWidgetPlacement placement;
+  final LayoutBreakpoint breakpoint;
+  final double cellWidth;
+  final double rowHeight;
+  final double gap;
+  final bool editMode;
+  final ValueChanged<DashboardWidgetPlacement> onCommit;
+  final Widget child;
+
+  const _EditableGridItem({
+    required this.placement,
+    required this.breakpoint,
+    required this.cellWidth,
+    required this.rowHeight,
+    required this.gap,
+    required this.editMode,
+    required this.onCommit,
+    required this.child,
+  });
+
+  @override
+  State<_EditableGridItem> createState() => _EditableGridItemState();
+}
+
+class _EditableGridItemState extends State<_EditableGridItem> {
+  Offset _dragOffset = Offset.zero;
+  Offset _resizeOffset = Offset.zero;
+
+  DashboardWidgetPlacement get _preview {
+    final horizontalStep = widget.cellWidth + widget.gap;
+    final verticalStep = widget.rowHeight + widget.gap;
+    return DashboardGridService.clamp(
+      widget.placement.copyWith(
+        x: widget.placement.x + (_dragOffset.dx / horizontalStep).round(),
+        y: widget.placement.y + (_dragOffset.dy / verticalStep).round(),
+        width:
+            widget.placement.width +
+            (_resizeOffset.dx / horizontalStep).round(),
+        height:
+            widget.placement.height + (_resizeOffset.dy / verticalStep).round(),
+      ),
+      widget.breakpoint,
+    );
+  }
+
+  @override
+  void didUpdateWidget(_EditableGridItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.placement != widget.placement || !widget.editMode) {
+      _dragOffset = Offset.zero;
+      _resizeOffset = Offset.zero;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = _preview;
+    final width =
+        preview.width * widget.cellWidth + (preview.width - 1) * widget.gap;
+    final height =
+        preview.height * widget.rowHeight + (preview.height - 1) * widget.gap;
+    final translation = Offset(
+      (preview.x - widget.placement.x) * (widget.cellWidth + widget.gap),
+      (preview.y - widget.placement.y) * (widget.rowHeight + widget.gap),
+    );
+
+    return Focus(
+      onKeyEvent: (_, event) => _handleKeyEvent(event),
+      child: Transform.translate(
+        offset: translation,
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minWidth: 0,
+          minHeight: 0,
+          maxWidth: double.infinity,
+          maxHeight: double.infinity,
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: IgnorePointer(
+                    ignoring: widget.editMode,
+                    child: widget.child,
+                  ),
+                ),
+                if (widget.editMode) ...[
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 2,
+                          ),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primary.withValues(alpha: 0.025),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 8,
+                    top: 8,
+                    child: _GridHandle(
+                      icon: Icons.open_with_rounded,
+                      tooltip: 'Move ${widget.placement.id}',
+                      cursor: SystemMouseCursors.move,
+                      onPanUpdate: (details) =>
+                          setState(() => _dragOffset += details.delta),
+                      onPanEnd: (_) => _commitPreview(),
+                    ),
+                  ),
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: _GridHandle(
+                      icon: Icons.aspect_ratio_rounded,
+                      tooltip: 'Resize ${widget.placement.id}',
+                      cursor: SystemMouseCursors.resizeDownRight,
+                      onPanUpdate: (details) =>
+                          setState(() => _resizeOffset += details.delta),
+                      onPanEnd: (_) => _commitPreview(),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  KeyEventResult _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent || !widget.editMode) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape &&
+        (_dragOffset != Offset.zero || _resizeOffset != Offset.zero)) {
+      setState(() {
+        _dragOffset = Offset.zero;
+        _resizeOffset = Offset.zero;
+      });
+      return KeyEventResult.handled;
+    }
+    final delta = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowLeft => (-1, 0),
+      LogicalKeyboardKey.arrowRight => (1, 0),
+      LogicalKeyboardKey.arrowUp => (0, -1),
+      LogicalKeyboardKey.arrowDown => (0, 1),
+      _ => null,
+    };
+    if (delta == null) return KeyEventResult.ignored;
+    final resize = HardwareKeyboard.instance.isShiftPressed;
+    final updated = resize
+        ? widget.placement.copyWith(
+            width: widget.placement.width + delta.$1,
+            height: widget.placement.height + delta.$2,
+          )
+        : widget.placement.copyWith(
+            x: widget.placement.x + delta.$1,
+            y: widget.placement.y + delta.$2,
+          );
+    widget.onCommit(DashboardGridService.clamp(updated, widget.breakpoint));
+    return KeyEventResult.handled;
+  }
+
+  void _commitPreview() {
+    final preview = _preview;
+    setState(() {
+      _dragOffset = Offset.zero;
+      _resizeOffset = Offset.zero;
+    });
+    if (preview.x == widget.placement.x &&
+        preview.y == widget.placement.y &&
+        preview.width == widget.placement.width &&
+        preview.height == widget.placement.height) {
+      return;
+    }
+    widget.onCommit(preview);
+  }
+}
+
+class _GridHandle extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final MouseCursor cursor;
+  final GestureDragUpdateCallback onPanUpdate;
+  final GestureDragEndCallback onPanEnd;
+
+  const _GridHandle({
+    required this.icon,
+    required this.tooltip,
+    required this.cursor,
+    required this.onPanUpdate,
+    required this.onPanEnd,
+  });
+
+  @override
+  State<_GridHandle> createState() => _GridHandleState();
+}
+
+class _GridHandleState extends State<_GridHandle> {
+  final FocusNode _focusNode = FocusNode();
+  bool _focused = false;
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: _focusNode,
+      onFocusChange: (value) => setState(() => _focused = value),
+      child: Semantics(
+        button: true,
+        label: widget.tooltip,
+        child: Tooltip(
+          message: widget.tooltip,
+          child: MouseRegion(
+            cursor: widget.cursor,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _focusNode.requestFocus,
+              onPanStart: (_) => _focusNode.requestFocus(),
+              onPanUpdate: widget.onPanUpdate,
+              onPanEnd: widget.onPanEnd,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _focused
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.outlineVariant,
+                    width: _focused ? 2 : 1,
+                  ),
+                ),
+                child: Icon(
+                  widget.icon,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 20,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardGridPainter extends CustomPainter {
+  final int columns;
+  final double cellWidth;
+  final double rowHeight;
+  final double gap;
+  final Color color;
+
+  const _DashboardGridPainter({
+    required this.columns,
+    required this.cellWidth,
+    required this.rowHeight,
+    required this.gap,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.1)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    final rows = (size.height / (rowHeight + gap)).ceil();
+    for (var row = 0; row < rows; row++) {
+      for (var column = 0; column < columns; column++) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(
+              column * (cellWidth + gap),
+              row * (rowHeight + gap),
+              cellWidth,
+              rowHeight,
+            ),
+            const Radius.circular(10),
+          ),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashboardGridPainter oldDelegate) =>
+      oldDelegate.columns != columns ||
+      oldDelegate.cellWidth != cellWidth ||
+      oldDelegate.rowHeight != rowHeight ||
+      oldDelegate.gap != gap ||
+      oldDelegate.color != color;
+}
+
 class _WindowControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -944,7 +1375,9 @@ class _WindowControls extends StatelessWidget {
       return _TopBarButton(
         icon: Icons.lock_outline,
         label: 'LOCKED',
-        color: AppTheme.textMuted,
+        color: Theme.of(
+          context,
+        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
         onTap: () {},
       );
     }
@@ -952,12 +1385,14 @@ class _WindowControls extends StatelessWidget {
     return Row(
       children: [
         _WinButton(
+          tooltip: 'Minimize',
           color: const Color(0xFFFFBD2E),
           icon: Icons.minimize_rounded,
           onTap: () => _minimizeWindow(dashboard),
         ),
         const SizedBox(width: 8),
         _WinButton(
+          tooltip: 'Maximize or restore',
           color: const Color(0xFF28C840),
           icon: Icons.crop_square_rounded,
           onTap: () async {
@@ -970,6 +1405,7 @@ class _WindowControls extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         _WinButton(
+          tooltip: 'Close',
           color: const Color(0xFFFF5F56),
           icon: Icons.close_rounded,
           onTap: () => windowManager.close(),
@@ -990,11 +1426,13 @@ class _WindowControls extends StatelessWidget {
 }
 
 class _WinButton extends StatefulWidget {
+  final String tooltip;
   final Color color;
   final IconData icon;
   final VoidCallback onTap;
 
   const _WinButton({
+    required this.tooltip,
     required this.color,
     required this.icon,
     required this.onTap,
@@ -1005,39 +1443,17 @@ class _WinButton extends StatefulWidget {
 }
 
 class _WinButtonState extends State<_WinButton> {
-  bool _hovered = false;
-
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: widget.onTap,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          width: 28,
-          height: 24,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            color: widget.color,
-            boxShadow: _hovered
-                ? [
-                    BoxShadow(
-                      color: widget.color.withValues(alpha: 0.6),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Icon(
-            widget.icon,
-            size: 14,
-            color: Colors.black.withValues(alpha: _hovered ? 0.75 : 0.5),
-          ),
-        ),
+    return IconButton(
+      tooltip: widget.tooltip,
+      onPressed: widget.onTap,
+      style: IconButton.styleFrom(
+        minimumSize: const Size(36, 36),
+        backgroundColor: widget.color,
+        foregroundColor: Colors.black.withValues(alpha: .7),
       ),
+      icon: Icon(widget.icon, size: 14),
     );
   }
 }

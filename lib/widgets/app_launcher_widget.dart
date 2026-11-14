@@ -1,10 +1,12 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../models/models.dart';
 import '../providers/dashboard_provider.dart';
 import '../services/app_icon_service.dart';
-import '../services/launch_window_service.dart';
+import '../services/app_launch_service.dart';
 import '../theme/app_theme.dart';
 import 'add_app_dialog.dart';
 
@@ -13,14 +15,19 @@ class AppLauncherWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dashboard = context.watch<DashboardProvider>();
-    final apps = dashboard.apps;
+    final selected = context
+        .select<DashboardProvider, (List<AppShortcut>, bool)>(
+          (dashboard) => (dashboard.apps, dashboard.isEditMode),
+        );
+    final dashboard = context.read<DashboardProvider>();
+    final apps = selected.$1;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppTheme.glassDecoration(
+        context,
         borderRadius: 20,
-        borderColor: AppTheme.neonGreen.withValues(alpha: 0.15),
+        borderColor: AppTheme.accent(context).withValues(alpha: 0.15),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -28,52 +35,29 @@ class AppLauncherWidget extends StatelessWidget {
           // Header
           Row(
             children: [
-              Icon(Icons.apps_rounded, color: AppTheme.neonGreen, size: 14),
+              Icon(
+                Icons.apps_rounded,
+                color: AppTheme.accent(context),
+                size: 14,
+              ),
               const SizedBox(width: 8),
-              Text(
-                'APP LAUNCHER',
-                style: TextStyle(
-                  color: AppTheme.neonGreen,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 3,
+              Expanded(
+                child: Text(
+                  'APP LAUNCHER',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.accent(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 3,
+                  ),
                 ),
               ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => _showAddAppDialog(context, dashboard),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.neonGreen.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: AppTheme.neonGreen.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.add_rounded,
-                        color: AppTheme.neonGreen,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'ADD APP',
-                        style: TextStyle(
-                          color: AppTheme.neonGreen,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              TextButton.icon(
+                onPressed: () => _showAddAppDialog(context, dashboard),
+                icon: const Icon(Icons.add_rounded, size: 16),
+                label: const Text('ADD APP'),
               ),
             ],
           ),
@@ -86,29 +70,73 @@ class AppLauncherWidget extends StatelessWidget {
               : Wrap(
                   spacing: 12,
                   runSpacing: 12,
-                  children: apps
-                      .asMap()
-                      .entries
-                      .map(
-                        (app) => _AppIcon(
-                          app: app.value,
-                          isEditMode: dashboard.isEditMode,
-                          onLaunch: () => _launchApp(context, app.value),
-                          onDelete: () =>
-                              _confirmDeleteApp(context, dashboard, app.value),
-                          onEdit: () =>
-                              _showEditAppDialog(context, dashboard, app.value),
-                          onMoveUp: app.key > 0
-                              ? () =>
-                                    dashboard.reorderApps(app.key, app.key - 1)
-                              : null,
-                          onMoveDown: app.key < apps.length - 1
-                              ? () =>
-                                    dashboard.reorderApps(app.key, app.key + 2)
-                              : null,
-                        ),
-                      )
-                      .toList(),
+                  children: apps.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final app = entry.value;
+                    final iconWidget = _AppIcon(
+                      app: app,
+                      isEditMode: selected.$2,
+                      onLaunch: () => _launchApp(context, app),
+                      onDelete: () =>
+                          _confirmDeleteApp(context, dashboard, app),
+                      onEdit: () =>
+                          _showEditAppDialog(context, dashboard, app),
+                      onMoveUp: index > 0
+                          ? () => dashboard.reorderApps(index, index - 1)
+                          : null,
+                      onMoveDown: index < apps.length - 1
+                          ? () => dashboard.reorderApps(index, index + 2)
+                          : null,
+                    );
+
+                    if (!selected.$2) {
+                      return iconWidget;
+                    }
+
+                    return DragTarget<int>(
+                      onWillAcceptWithDetails: (details) => details.data != index,
+                      onAcceptWithDetails: (details) {
+                        final fromIndex = details.data;
+                        dashboard.reorderApps(
+                          fromIndex,
+                          index > fromIndex ? index + 1 : index,
+                        );
+                      },
+                      builder: (context, candidateData, rejectedData) {
+                        final isHovered = candidateData.isNotEmpty;
+                        return AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            border: isHovered
+                                ? Border.all(
+                                    color: AppTheme.accent(context),
+                                    width: 2,
+                                  )
+                                : null,
+                          ),
+                          child: Draggable<int>(
+                            data: index,
+                            feedback: Material(
+                              color: Colors.transparent,
+                              child: Opacity(
+                                opacity: 0.9,
+                                child: Transform.scale(
+                                  scale: 1.08,
+                                  child: iconWidget,
+                                ),
+                              ),
+                            ),
+                            childWhenDragging: Opacity(
+                              opacity: 0.3,
+                              child: iconWidget,
+                            ),
+                            child: iconWidget,
+                          ),
+                        );
+                      },
+                    );
+                  }).toList(),
                 ),
         ],
       ),
@@ -116,22 +144,37 @@ class AppLauncherWidget extends StatelessWidget {
   }
 
   Widget _emptyState(BuildContext context, DashboardProvider dashboard) {
-    return GestureDetector(
+    return InkWell(
       onTap: () => _showAddAppDialog(context, dashboard),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 24),
         decoration: BoxDecoration(
-          border: Border.all(color: AppTheme.glassBorder, width: 1),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            width: 1,
+          ),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           children: [
-            Icon(Icons.add_circle_outline, color: AppTheme.textMuted, size: 32),
+            Icon(
+              Icons.add_circle_outline,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+              size: 32,
+            ),
             const SizedBox(height: 8),
             Text(
               'Add your first app',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+                fontSize: 13,
+              ),
             ),
           ],
         ),
@@ -140,61 +183,23 @@ class AppLauncherWidget extends StatelessWidget {
   }
 
   Future<void> _launchApp(BuildContext context, AppShortcut app) async {
-    var launched = false;
-    Object? launchError;
-    LaunchWindowPolicy? launchPolicy;
+    final dashboard = context.read<DashboardProvider>();
     try {
-      final dashboard = context.read<DashboardProvider>();
-      final path = app.executablePath.replaceAll(
-        '%USERNAME%',
-        Platform.environment['USERNAME'] ?? '',
+      await AppLaunchService.instance.launchAppWithPolicy(
+        app: app,
+        dashboard: dashboard,
       );
-
-      launchPolicy = LaunchWindowPolicy.fromDashboard(dashboard);
-      await prepareWindowForExternalLaunch(launchPolicy);
-
-      if (_isUwpOrProtocol(path)) {
-        String launchTarget = path;
-        if (!path.startsWith('shell:') && !path.contains(':')) {
-          launchTarget = 'shell:AppsFolder\\$path';
-        }
-        final process = await Process.start('cmd', [
-          '/c',
-          'start',
-          '',
-          launchTarget,
-        ], runInShell: true);
-        final exitCode = await process.exitCode;
-        if (exitCode != 0) {
-          throw Exception('Shell command failed with exit code $exitCode');
-        }
-        launched = true;
-      } else {
-        if (!File(path).existsSync()) {
-          throw Exception('File does not exist: $path');
-        }
-        await Process.start(path, [], runInShell: true);
-        launched = true;
-      }
     } catch (e) {
-      launchError = e;
-    } finally {
-      if (launchError == null && launched) {
-        await finishSuccessfulExternalLaunch(launchPolicy!);
-      } else if (launchPolicy != null) {
-        await restoreWindowAfterFailedExternalLaunch(launchPolicy);
-      }
-    }
-
-    if (launchError != null && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Could not launch ${app.name}: ${launchError.toString()}',
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not launch ${app.name}: ${e.toString()}',
+            ),
+            backgroundColor: AppTheme.neonPink,
           ),
-          backgroundColor: AppTheme.neonPink,
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -271,7 +276,7 @@ Future<AppShortcutPathStatus> checkAppShortcutPaths(AppShortcut app) async {
   return AppShortcutPathStatus(iconExists: results[0], pathExists: results[1]);
 }
 
-// ─── App Icon ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ App Icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _AppIcon extends StatefulWidget {
   final AppShortcut app;
   final bool isEditMode;
@@ -366,8 +371,9 @@ class _AppIconState extends State<_AppIcon>
       },
       child: ScaleTransition(
         scale: _scaleAnim,
-        child: GestureDetector(
+        child: InkWell(
           onTap: widget.isEditMode ? widget.onEdit : widget.onLaunch,
+          borderRadius: BorderRadius.circular(14),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -378,22 +384,13 @@ class _AppIconState extends State<_AppIcon>
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
                   color: _hovered
-                      ? AppTheme.neonGreen.withValues(alpha: 0.12)
+                      ? AppTheme.accent(context).withValues(alpha: 0.12)
                       : Colors.white.withValues(alpha: 0.05),
                   border: Border.all(
                     color: _hovered
-                        ? AppTheme.neonGreen.withValues(alpha: 0.45)
+                        ? AppTheme.accent(context).withValues(alpha: 0.45)
                         : Colors.white.withValues(alpha: 0.1),
                   ),
-                  boxShadow: _hovered
-                      ? [
-                          BoxShadow(
-                            color: AppTheme.neonGreen.withValues(alpha: 0.25),
-                            blurRadius: 20,
-                            spreadRadius: -4,
-                          ),
-                        ]
-                      : null,
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -412,12 +409,17 @@ class _AppIconState extends State<_AppIcon>
                               child: Image.file(
                                 File(widget.app.iconPath),
                                 fit: BoxFit.cover,
+                                cacheWidth: 88,
+                                cacheHeight: 88,
+                                filterQuality: FilterQuality.medium,
                               ),
                             )
                           : Center(
                               child: Icon(
                                 Icons.apps_rounded,
-                                color: AppTheme.textSecondary,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                                 size: 24,
                               ),
                             ),
@@ -426,7 +428,7 @@ class _AppIconState extends State<_AppIcon>
                     Text(
                       widget.app.name,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 10,
                         fontWeight: FontWeight.w500,
                       ),
@@ -455,21 +457,20 @@ class _AppIconState extends State<_AppIcon>
                           icon: Icons.arrow_downward_rounded,
                           onTap: widget.onMoveDown!,
                         ),
-                      GestureDetector(
-                        onTap: widget.onDelete,
-                        child: Container(
-                          width: 18,
-                          height: 18,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: AppTheme.neonPink,
-                          ),
-                          child: Icon(
-                            Icons.close_rounded,
-                            color: Colors.white,
-                            size: 12,
-                          ),
+                      IconButton.filled(
+                        onPressed: widget.onDelete,
+                        tooltip: 'Remove ${widget.app.name}',
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
                         ),
+                        padding: EdgeInsets.zero,
+                        iconSize: 16,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.close_rounded),
                       ),
                     ],
                   ),
@@ -500,19 +501,13 @@ class _EditBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 18,
-        height: 18,
-        margin: const EdgeInsets.only(right: 3),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppTheme.darkCard,
-          border: Border.all(color: AppTheme.glassBorder),
-        ),
-        child: Icon(icon, color: AppTheme.textSecondary, size: 11),
-      ),
+    return IconButton.outlined(
+      onPressed: onTap,
+      tooltip: 'Reorder shortcut',
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      padding: EdgeInsets.zero,
+      iconSize: 16,
+      icon: Icon(icon),
     );
   }
 }
@@ -531,10 +526,10 @@ class _DeleteConfirmDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppTheme.darkCard,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: AppTheme.glassBorder),
+        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       title: Text(
         title,
@@ -547,12 +542,22 @@ class _DeleteConfirmDialog extends StatelessWidget {
       ),
       content: Text(
         message,
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: 13,
+        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: Text('CANCEL', style: TextStyle(color: AppTheme.textMuted)),
+          child: Text(
+            'CANCEL',
+            style: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+            ),
+          ),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(true),

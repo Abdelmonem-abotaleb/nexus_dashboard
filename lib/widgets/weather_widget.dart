@@ -1,9 +1,12 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../models/models.dart';
 import '../providers/weather_provider.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/window_activity_provider.dart';
 import '../theme/app_theme.dart';
 
 class WeatherWidget extends StatefulWidget {
@@ -16,12 +19,17 @@ class WeatherWidget extends StatefulWidget {
 class _WeatherWidgetState extends State<WeatherWidget> {
   Timer? _refreshTimer;
   int? _refreshMinutes;
+  bool _wasActive = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refresh();
+      final activity = Provider.of<WindowActivityProvider?>(
+        context,
+        listen: false,
+      );
+      if (activity?.isActive ?? true) _refresh();
     });
   }
 
@@ -34,7 +42,20 @@ class _WeatherWidgetState extends State<WeatherWidget> {
     );
   }
 
-  void _ensureRefreshTimer(int refreshMinutes) {
+  void _ensureRefreshTimer(int refreshMinutes, bool active) {
+    if (!active) {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
+      _refreshMinutes = null;
+      _wasActive = false;
+      return;
+    }
+    if (!_wasActive) {
+      _wasActive = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _refresh();
+      });
+    }
     if (_refreshMinutes == refreshMinutes) return;
     _refreshMinutes = refreshMinutes;
     _refreshTimer?.cancel();
@@ -56,7 +77,9 @@ class _WeatherWidgetState extends State<WeatherWidget> {
       (dashboard) =>
           (dashboard.weatherMetricUnits, dashboard.weatherRefreshMinutes),
     );
-    _ensureRefreshTimer(settings.$2);
+    final active =
+        Provider.of<WindowActivityProvider?>(context)?.isActive ?? true;
+    _ensureRefreshTimer(settings.$2, active);
     final weather = context.watch<WeatherProvider>();
     final data = weather.weatherData;
     final unit = settings.$1 ? '°C' : '°F';
@@ -65,8 +88,9 @@ class _WeatherWidgetState extends State<WeatherWidget> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppTheme.glassDecoration(
+        context,
         borderRadius: 20,
-        borderColor: AppTheme.neonPurple.withValues(alpha: 0.2),
+        borderColor: AppTheme.accent(context).withValues(alpha: 0.2),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -76,27 +100,52 @@ class _WeatherWidgetState extends State<WeatherWidget> {
             children: [
               Icon(
                 Icons.wb_sunny_outlined,
-                color: AppTheme.neonPurple,
+                color: AppTheme.accent(context),
                 size: 14,
               ),
               const SizedBox(width: 8),
               Text(
                 'WEATHER',
                 style: TextStyle(
-                  color: AppTheme.neonPurple,
+                  color: AppTheme.accent(context),
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 3,
                 ),
               ),
               const Spacer(),
-              GestureDetector(
-                onTap: _refresh,
-                child: Icon(
-                  Icons.refresh_rounded,
-                  color: AppTheme.textMuted,
-                  size: 16,
+              if (weather.isStale) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cloud_off_rounded, size: 10, color: Colors.white70),
+                      SizedBox(width: 4),
+                      Text(
+                        'OFFLINE',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 6),
+              ],
+              IconButton(
+                onPressed: _refresh,
+                tooltip: 'Refresh weather',
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                iconSize: 18,
+                icon: const Icon(Icons.refresh_rounded),
               ),
             ],
           ),
@@ -121,43 +170,49 @@ class _WeatherWidgetState extends State<WeatherWidget> {
                   style: TextStyle(fontSize: 40),
                 ),
                 const SizedBox(width: 16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          data.temperature.toStringAsFixed(0),
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 42,
-                            fontWeight: FontWeight.w200,
-                            height: 1,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(
-                            unit,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            data.temperature.toStringAsFixed(0),
                             style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 18,
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 42,
+                              fontWeight: FontWeight.w200,
+                              height: 1,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      data.city.toUpperCase(),
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                        letterSpacing: 2,
-                        fontWeight: FontWeight.w500,
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              unit,
+                              style: TextStyle(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                                fontSize: 18,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                      Text(
+                        data.city.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                          letterSpacing: 2,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -168,7 +223,10 @@ class _WeatherWidgetState extends State<WeatherWidget> {
               weather.isDemoData
                   ? '${_capitalize(data.condition)} · DEMO'
                   : _capitalize(data.condition),
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 13,
+              ),
             ),
 
             const SizedBox(height: 12),
@@ -225,7 +283,9 @@ class _WeatherWidgetState extends State<WeatherWidget> {
             Text(
               'No weather data.\nAdd API key in Settings.',
               style: TextStyle(
-                color: AppTheme.textMuted,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                 fontSize: 12,
                 height: 1.6,
               ),
@@ -262,11 +322,11 @@ class _ForecastCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
         color: isToday
-            ? AppTheme.neonPurple.withValues(alpha: 0.15)
+            ? AppTheme.accent(context).withValues(alpha: 0.15)
             : Colors.white.withValues(alpha: 0.04),
         border: Border.all(
           color: isToday
-              ? AppTheme.neonPurple.withValues(alpha: 0.4)
+              ? AppTheme.accent(context).withValues(alpha: 0.4)
               : Colors.white.withValues(alpha: 0.07),
         ),
       ),
@@ -275,7 +335,11 @@ class _ForecastCard extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: isToday ? AppTheme.neonPurple : AppTheme.textMuted,
+              color: isToday
+                  ? AppTheme.accent(context)
+                  : Theme.of(
+                      context,
+                    ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
               fontSize: 9,
               fontWeight: FontWeight.w700,
               letterSpacing: 1,
@@ -289,14 +353,19 @@ class _ForecastCard extends StatelessWidget {
           Text(
             '${day.tempMax.toStringAsFixed(0)}°',
             style: TextStyle(
-              color: AppTheme.textSecondary,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
           ),
           Text(
             '${day.tempMin.toStringAsFixed(0)}°',
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
+            style: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+              fontSize: 10,
+            ),
           ),
         ],
       ),
@@ -324,17 +393,31 @@ class _WeatherStat extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Icon(icon, color: AppTheme.textMuted, size: 14),
+        Icon(
+          icon,
+          color: Theme.of(
+            context,
+          ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+          size: 14,
+        ),
         const SizedBox(height: 4),
         Text(
           value,
           style: TextStyle(
-            color: AppTheme.textSecondary,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontSize: 12,
             fontWeight: FontWeight.w600,
           ),
         ),
-        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        Text(
+          label,
+          style: TextStyle(
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+            fontSize: 10,
+          ),
+        ),
       ],
     );
   }

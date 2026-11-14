@@ -13,8 +13,11 @@ class TrayService {
   final Menu _menu = Menu();
   bool _initialized = false;
   bool _exiting = false;
+  VoidCallback? onToggleWidgetMode;
+  final ValueNotifier<bool> visibleNotifier = ValueNotifier<bool>(true);
 
   bool get isExiting => _exiting;
+  bool get isVisible => visibleNotifier.value;
 
   Future<void> initialize() async {
     if (_initialized || !Platform.isWindows) return;
@@ -25,6 +28,13 @@ class TrayService {
       await _menu.buildFrom([
         MenuItemLabel(label: 'Show Nexus', onClicked: (_) => showWindow()),
         MenuItemLabel(label: 'Hide Nexus', onClicked: (_) => hideWindow()),
+        MenuItemLabel(
+          label: 'Switch Widget / Full Mode',
+          onClicked: (_) {
+            showWindow();
+            onToggleWidgetMode?.call();
+          },
+        ),
         MenuSeparator(),
         MenuItemLabel(label: 'Exit', onClicked: (_) => exitApp()),
       ]);
@@ -43,6 +53,7 @@ class TrayService {
   }
 
   Future<void> showWindow() async {
+    visibleNotifier.value = true;
     await windowManager.setSkipTaskbar(false);
     if (await windowManager.isMinimized()) {
       await windowManager.restore();
@@ -52,6 +63,7 @@ class TrayService {
   }
 
   Future<void> hideWindow() async {
+    visibleNotifier.value = false;
     await windowManager.hide();
   }
 

@@ -1,5 +1,7 @@
 #define AppName "Nexus Dashboard"
-#define AppVersion "1.0.0"
+#ifndef AppVersion
+#define AppVersion "1.2.0"
+#endif
 
 #ifndef ProjectDir
 #define ProjectDir ".."

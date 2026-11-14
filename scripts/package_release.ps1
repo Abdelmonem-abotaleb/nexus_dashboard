@@ -8,6 +8,11 @@ $buildDir = Join-Path $root "build\windows\x64\runner\$Configuration"
 $packageDir = Join-Path $root "dist"
 $zipPath = Join-Path $packageDir "nexus_dashboard_windows_$($Configuration.ToLower()).zip"
 $installerScript = Join-Path $root "scripts\nexus_dashboard.iss"
+$pubspec = Get-Content (Join-Path $root "pubspec.yaml") -Raw
+if ($pubspec -notmatch '(?m)^version:\s*([^+\s]+)') {
+  throw "Could not read app version from pubspec.yaml"
+}
+$appVersion = $Matches[1]
 
 function Find-InnoCompiler {
   $command = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
@@ -58,7 +63,7 @@ try {
 
   $iscc = Find-InnoCompiler
   if ($iscc) {
-    & $iscc "/DProjectDir=$root" "/DSourceDir=$buildDir" "/DOutputDir=$packageDir" $installerScript
+    & $iscc "/DAppVersion=$appVersion" "/DProjectDir=$root" "/DSourceDir=$buildDir" "/DOutputDir=$packageDir" $installerScript
     Write-Host "Built Nexus Dashboard installer in $packageDir"
   } else {
     Write-Host "Inno Setup not found; skipped installer build. Install Inno Setup and rerun this script to create the .exe installer."

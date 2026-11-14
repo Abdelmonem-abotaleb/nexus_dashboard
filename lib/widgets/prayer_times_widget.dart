@@ -61,20 +61,25 @@ class _PrayerTimesWidgetState extends State<PrayerTimesWidget> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppTheme.glassDecoration(
+        context,
         borderRadius: 20,
-        borderColor: AppTheme.neonGreen.withValues(alpha: 0.2),
+        borderColor: AppTheme.accent(context).withValues(alpha: 0.2),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.mosque_outlined, color: AppTheme.neonGreen, size: 15),
+              Icon(
+                Icons.mosque_outlined,
+                color: AppTheme.accent(context),
+                size: 15,
+              ),
               const SizedBox(width: 8),
               Text(
                 'PRAYER TIMES',
                 style: TextStyle(
-                  color: AppTheme.neonGreen,
+                  color: AppTheme.accent(context),
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 2,
@@ -86,7 +91,9 @@ class _PrayerTimesWidgetState extends State<PrayerTimesWidget> {
                 onPressed: _refresh,
                 icon: Icon(
                   Icons.refresh_rounded,
-                  color: AppTheme.textMuted,
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                   size: 16,
                 ),
               ),
@@ -107,14 +114,19 @@ class _PrayerTimesWidgetState extends State<PrayerTimesWidget> {
           else if (data == null)
             Text(
               'Prayer times unavailable.',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+                fontSize: 12,
+              ),
             )
           else ...[
             if (next != null)
               Text(
                 'NEXT: ${next.$1.toUpperCase()} • ${next.$2}',
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1,
@@ -183,7 +195,11 @@ class _PrayerTime extends StatelessWidget {
       Text(
         label,
         style: TextStyle(
-          color: highlighted ? AppTheme.neonGreen : AppTheme.textMuted,
+          color: highlighted
+              ? AppTheme.neonGreen
+              : Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
           fontSize: 10,
         ),
       ),
@@ -191,7 +207,9 @@ class _PrayerTime extends StatelessWidget {
       Text(
         time,
         style: TextStyle(
-          color: highlighted ? AppTheme.neonGreen : AppTheme.textPrimary,
+          color: highlighted
+              ? AppTheme.neonGreen
+              : Theme.of(context).colorScheme.onSurface,
           fontSize: 17,
           fontWeight: FontWeight.w600,
         ),

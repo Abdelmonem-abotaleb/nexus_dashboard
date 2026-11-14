@@ -1,67 +1,59 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static bool useDarkMode = true;
-  static double glassIntensity = 1.0;
-
-  // Neon accent colors
-  static const Color neonBlue = Color(0xFF00A8E8);
-  static const Color neonPurple = Color(0xFF7B2FFF);
-  static const Color neonGreen = Color(0xFF00C781);
-  static const Color neonPink = Color(0xFFE91E63);
-
-  static Color get darkBase =>
-      useDarkMode ? const Color(0xFF050A14) : const Color(0xFFF5F8FC);
-  static Color get darkSurface =>
-      useDarkMode ? const Color(0xFF0D1626) : const Color(0xFFFFFFFF);
-  static Color get darkCard =>
-      useDarkMode ? const Color(0xFF111C2E) : const Color(0xFFEAF0F7);
-  static Color get glassBorder =>
-      useDarkMode ? const Color(0x33FFFFFF) : const Color(0x33445B74);
-
-  static Color get textPrimary =>
-      useDarkMode ? const Color(0xFFE8F4FF) : const Color(0xFF142033);
-  static Color get textSecondary =>
-      useDarkMode ? const Color(0xFF8AAAC8) : const Color(0xFF3F5874);
-  static Color get textMuted =>
-      useDarkMode ? const Color(0xFF3D5A7A) : const Color(0xFF71859B);
+  static const Color neonBlue = Color(0xFF2D7FF9);
+  static const Color neonPurple = Color(0xFF7C5CFC);
+  static const Color neonGreen = Color(0xFF00A884);
+  static const Color neonPink = Color(0xFFD94F70);
+  static const Color neonOrange = Color(0xFFFF9500);
 
   static ThemeData get darkTheme => _theme(useDark: true);
   static ThemeData get lightTheme => _theme(useDark: false);
 
-  static ThemeData _theme({required bool useDark}) {
-    final base = useDark ? const Color(0xFF050A14) : const Color(0xFFF5F8FC);
-    final surface = useDark ? const Color(0xFF0D1626) : Colors.white;
-    final card = useDark ? const Color(0xFF111C2E) : const Color(0xFFEAF0F7);
+  static ThemeData darkThemeWithAccent(Color accent, double intensity) =>
+      _theme(useDark: true, accent: accent, glassIntensity: intensity);
+
+  static ThemeData lightThemeWithAccent(Color accent, double intensity) =>
+      _theme(useDark: false, accent: accent, glassIntensity: intensity);
+
+  static ThemeData _theme({
+    required bool useDark,
+    Color accent = neonBlue,
+    double glassIntensity = 1,
+  }) {
+    final base = useDark ? const Color(0xFF0B0F14) : const Color(0xFFF4F6F8);
+    final surface = useDark ? const Color(0xFF121820) : Colors.white;
+    final card = useDark ? const Color(0xFF18202A) : const Color(0xFFE9EDF2);
     final primaryText = useDark
-        ? const Color(0xFFE8F4FF)
-        : const Color(0xFF142033);
+        ? const Color(0xFFF2F5F8)
+        : const Color(0xFF18202A);
     final secondaryText = useDark
-        ? const Color(0xFF8AAAC8)
-        : const Color(0xFF3F5874);
+        ? const Color(0xFFB2BEC9)
+        : const Color(0xFF4A5868);
     final mutedText = useDark
-        ? const Color(0xFF3D5A7A)
-        : const Color(0xFF71859B);
+        ? const Color(0xFF8190A0)
+        : const Color(0xFF667587);
     final border = useDark ? const Color(0x33FFFFFF) : const Color(0x33445B74);
 
     return ThemeData(
       useMaterial3: true,
       brightness: useDark ? Brightness.dark : Brightness.light,
       scaffoldBackgroundColor: base,
-      colorScheme: ColorScheme(
-        brightness: useDark ? Brightness.dark : Brightness.light,
-        primary: neonBlue,
-        onPrimary: useDark ? Colors.white : const Color(0xFF06111F),
-        secondary: neonPurple,
-        onSecondary: Colors.white,
-        tertiary: neonGreen,
-        onTertiary: const Color(0xFF06111F),
-        error: neonPink,
-        onError: Colors.white,
-        surface: surface,
-        onSurface: primaryText,
-      ),
-      fontFamily: 'Rajdhani',
+      colorScheme:
+          ColorScheme.fromSeed(
+            seedColor: accent,
+            brightness: useDark ? Brightness.dark : Brightness.light,
+            surface: surface,
+            error: neonPink,
+          ).copyWith(
+            primary: accent,
+            secondary: accent,
+            tertiary: accent,
+            onSurface: primaryText,
+            outlineVariant: border,
+          ),
+      fontFamily: 'Segoe UI',
+      extensions: [NexusVisualTheme(glassIntensity: glassIntensity)],
       textTheme: TextTheme(
         displayLarge: TextStyle(
           color: primaryText,
@@ -79,82 +71,61 @@ class AppTheme {
           color: primaryText,
           fontSize: 32,
           fontWeight: FontWeight.w600,
-          letterSpacing: 1,
         ),
         headlineMedium: TextStyle(
           color: primaryText,
           fontSize: 24,
           fontWeight: FontWeight.w600,
         ),
-        bodyLarge: TextStyle(
-          color: primaryText,
-          fontSize: 16,
-          fontWeight: FontWeight.w400,
-        ),
-        bodyMedium: TextStyle(
-          color: secondaryText,
-          fontSize: 14,
-          fontWeight: FontWeight.w400,
-        ),
+        bodyLarge: TextStyle(color: primaryText, fontSize: 16),
+        bodyMedium: TextStyle(color: secondaryText, fontSize: 14),
         labelSmall: TextStyle(
           color: mutedText,
           fontSize: 11,
-          fontWeight: FontWeight.w500,
-          letterSpacing: 1.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.2,
         ),
       ),
       cardTheme: CardThemeData(
-        color: card.withValues(alpha: useDark ? 0.7 : 0.82),
+        color: card.withValues(alpha: useDark ? .78 : .88),
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: border, width: 1),
+          side: BorderSide(color: border),
         ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: card.withValues(alpha: .66),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
 
-  static LinearGradient get backgroundGradient => LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: useDarkMode
-        ? [darkBase, const Color(0xFF080F1E), const Color(0xFF050A14)]
-        : [
-            const Color(0xFFF7FAFE),
-            const Color(0xFFEAF2FA),
-            const Color(0xFFFFFFFF),
-          ],
-  );
+  static LinearGradient backgroundGradient(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: dark
+          ? const [Color(0xFF0B0F14), Color(0xFF101722), Color(0xFF0B0F14)]
+          : const [Color(0xFFF7F9FB), Color(0xFFEEF2F6), Color(0xFFFFFFFF)],
+    );
+  }
 
-  static LinearGradient get neonBlueGradient => const LinearGradient(
-    colors: [neonBlue, neonPurple],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
+  static Color accent(BuildContext context) =>
+      Theme.of(context).colorScheme.primary;
 
-  static LinearGradient get cardGradient => LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: useDarkMode
-        ? [
-            Colors.white.withValues(alpha: 0.08 * glassIntensity),
-            Colors.white.withValues(alpha: 0.03 * glassIntensity),
-          ]
-        : [
-            Colors.white.withValues(
-              alpha: (0.86 * glassIntensity).clamp(0.2, 1.0),
-            ),
-            Colors.white.withValues(
-              alpha: (0.58 * glassIntensity).clamp(0.2, 1.0),
-            ),
-          ],
-  );
-
-  static BoxDecoration glassDecoration({
+  static BoxDecoration glassDecoration(
+    BuildContext context, {
     double borderRadius = 16,
     Color? borderColor,
     List<Color>? gradientColors,
   }) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final intensity =
+        theme.extension<NexusVisualTheme>()?.glassIntensity ?? 1.0;
     return BoxDecoration(
       borderRadius: BorderRadius.circular(borderRadius),
       gradient: LinearGradient(
@@ -162,51 +133,42 @@ class AppTheme {
         end: Alignment.bottomRight,
         colors:
             gradientColors ??
-            (useDarkMode
+            (dark
                 ? [
-                    Colors.white.withValues(alpha: 0.08 * glassIntensity),
-                    Colors.white.withValues(alpha: 0.03 * glassIntensity),
+                    Colors.white.withValues(alpha: .055 * intensity),
+                    Colors.white.withValues(alpha: .025 * intensity),
                   ]
                 : [
                     Colors.white.withValues(
-                      alpha: (0.78 * glassIntensity).clamp(0.2, 1.0),
+                      alpha: (.8 * intensity).clamp(.2, 1),
                     ),
                     Colors.white.withValues(
-                      alpha: (0.46 * glassIntensity).clamp(0.2, 1.0),
+                      alpha: (.5 * intensity).clamp(.2, 1),
                     ),
                   ]),
       ),
-      border: Border.all(color: borderColor ?? glassBorder, width: 1),
-      boxShadow: [
-        BoxShadow(
-          color: useDarkMode
-              ? neonBlue.withValues(alpha: 0.05)
-              : Colors.black.withValues(alpha: 0.08),
-          blurRadius: 20,
-          spreadRadius: 0,
-        ),
-      ],
+      border: Border.all(
+        color: borderColor ?? theme.colorScheme.outlineVariant,
+      ),
     );
   }
+}
 
-  static BoxDecoration neonGlowDecoration(
-    Color glowColor, {
-    double borderRadius = 12,
-  }) {
-    return BoxDecoration(
-      borderRadius: BorderRadius.circular(borderRadius),
-      boxShadow: [
-        BoxShadow(
-          color: glowColor.withValues(alpha: useDarkMode ? 0.4 : 0.18),
-          blurRadius: 20,
-          spreadRadius: -4,
-        ),
-        BoxShadow(
-          color: glowColor.withValues(alpha: useDarkMode ? 0.2 : 0.1),
-          blurRadius: 40,
-          spreadRadius: -8,
-        ),
-      ],
+@immutable
+class NexusVisualTheme extends ThemeExtension<NexusVisualTheme> {
+  final double glassIntensity;
+  const NexusVisualTheme({required this.glassIntensity});
+
+  @override
+  NexusVisualTheme copyWith({double? glassIntensity}) =>
+      NexusVisualTheme(glassIntensity: glassIntensity ?? this.glassIntensity);
+
+  @override
+  NexusVisualTheme lerp(covariant NexusVisualTheme? other, double t) {
+    if (other == null) return this;
+    return NexusVisualTheme(
+      glassIntensity:
+          glassIntensity + (other.glassIntensity - glassIntensity) * t,
     );
   }
 }

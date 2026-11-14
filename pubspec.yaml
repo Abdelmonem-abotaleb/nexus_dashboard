@@ -1,6 +1,6 @@
 name: nexus_dashboard
 description: A sleek, customizable Windows login screen and dashboard.
-version: 1.0.1+2
+version: 1.2.0+5
 publish_to: 'none'
 
 environment:
@@ -32,6 +32,15 @@ dependencies:
   # Intl for date formatting
   intl: ^0.20.2
   system_tray: 2.0.3
+
+  # Windows Native & System
+  win32: ^5.5.0
+  ffi: ^2.1.0
+  path_provider: ^2.1.4
+  hotkey_manager: ^0.2.3
+  flutter_acrylic: ^1.1.4
+  system_theme: ^3.1.2
+  flutter_local_notifications: ^19.0.0
 
 dev_dependencies:
   flutter_test:

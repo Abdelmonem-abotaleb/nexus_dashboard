@@ -3,15 +3,66 @@ import 'package:flutter/material.dart';
 import '../services/power_service.dart';
 import '../theme/app_theme.dart';
 
+class PowerActionsWidget extends StatelessWidget {
+  const PowerActionsWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppTheme.glassDecoration(context, borderRadius: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'POWER',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const Spacer(),
+          Row(
+            children: PowerAction.values
+                .map(
+                  (action) => Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: action == PowerAction.values.last ? 0 : 8,
+                      ),
+                      child: _PowerButton(action: action),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+}
+
+/// Kept for callers that need one action; the redesigned dashboard uses the
+/// consolidated [PowerActionsWidget].
 class PowerActionWidget extends StatelessWidget {
   final PowerAction action;
-
   const PowerActionWidget({super.key, required this.action});
 
+  @override
+  Widget build(BuildContext context) => _PowerButton(action: action);
+}
+
+class _PowerButton extends StatelessWidget {
+  final PowerAction action;
+  const _PowerButton({required this.action});
+
   String get _title => switch (action) {
-    PowerAction.shutdown => 'SHUT DOWN',
-    PowerAction.restart => 'RESTART',
-    PowerAction.sleep => 'SLEEP',
+    PowerAction.shutdown => 'Shut down',
+    PowerAction.restart => 'Restart',
+    PowerAction.sleep => 'Sleep',
   };
 
   String get _confirmMessage => switch (action) {
@@ -26,97 +77,54 @@ class PowerActionWidget extends StatelessWidget {
     PowerAction.sleep => Icons.nights_stay_rounded,
   };
 
-  Color get _color => switch (action) {
-    PowerAction.shutdown => AppTheme.neonPink,
-    PowerAction.restart => const Color(0xFFFFBD2E),
-    PowerAction.sleep => AppTheme.neonBlue,
-  };
-
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _confirmAndRun(context),
-      child: Container(
-        width: double.infinity,
-        height: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: AppTheme.glassDecoration(
-          borderRadius: 20,
-          borderColor: _color.withValues(alpha: 0.2),
+    return Tooltip(
+      message: _title,
+      child: OutlinedButton(
+        onPressed: () => _confirmAndRun(context),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(44, 64),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(_icon, color: _color, size: 30),
-              const SizedBox(height: 10),
-              Text(
-                _title,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _color,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 2,
-                ),
-              ),
-            ],
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_icon, size: 22),
+            const SizedBox(height: 6),
+            Text(_title, maxLines: 1, style: const TextStyle(fontSize: 10)),
+          ],
         ),
       ),
     );
   }
 
   Future<void> _confirmAndRun(BuildContext context) async {
-    final theme = Theme.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
-      barrierColor: AppTheme.useDarkMode
-          ? Colors.black.withValues(alpha: 0.6)
-          : Colors.white.withValues(alpha: 0.35),
       builder: (_) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppTheme.glassBorder),
-        ),
-        title: Text(
-          _title,
-          style: TextStyle(
-            color: _color,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 2,
-          ),
-        ),
-        content: Text(
-          _confirmMessage,
-          style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 13),
-        ),
+        title: Text(_title),
+        content: Text(_confirmMessage),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('CANCEL', style: TextStyle(color: AppTheme.textMuted)),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(_title, style: TextStyle(color: _color)),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(_title),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
-
     try {
       await runPowerAction(action);
-    } catch (e) {
+    } catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not run $_title: ${e.toString()}'),
-          backgroundColor: AppTheme.neonPink,
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not run $_title: $error')));
     }
   }
 }

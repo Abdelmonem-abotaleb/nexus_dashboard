@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../models/models.dart';
 import '../providers/system_provider.dart';
 import '../theme/app_theme.dart';
@@ -15,8 +16,9 @@ class SystemStatsWidget extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppTheme.glassDecoration(
+        context,
         borderRadius: 20,
-        borderColor: AppTheme.neonGreen.withValues(alpha: 0.15),
+        borderColor: AppTheme.accent(context).withValues(alpha: 0.15),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -24,24 +26,35 @@ class SystemStatsWidget extends StatelessWidget {
           // Header
           Row(
             children: [
-              Icon(Icons.memory_rounded, color: AppTheme.neonGreen, size: 14),
+              Icon(
+                Icons.memory_rounded,
+                color: AppTheme.accent(context),
+                size: 14,
+              ),
               const SizedBox(width: 8),
               Text(
                 'SYSTEM',
                 style: TextStyle(
-                  color: AppTheme.neonGreen,
+                  color: AppTheme.accent(context),
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 3,
                 ),
               ),
-              const Spacer(),
-              Text(
-                stats.hostname,
-                style: TextStyle(
-                  color: AppTheme.textMuted,
-                  fontSize: 10,
-                  letterSpacing: 1,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  stats.hostname,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+                    fontSize: 10,
+                    letterSpacing: 1,
+                  ),
                 ),
               ),
             ],
@@ -119,16 +132,24 @@ class SystemStatsWidget extends StatelessWidget {
               children: [
                 Icon(
                   Icons.computer_rounded,
-                  color: AppTheme.textMuted,
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                   size: 12,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  stats.osName,
-                  style: TextStyle(
-                    color: AppTheme.textMuted,
-                    fontSize: 11,
-                    letterSpacing: 0.5,
+                Expanded(
+                  child: Text(
+                    stats.osName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+                      fontSize: 11,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ),
               ],
@@ -246,7 +267,9 @@ class _StatBar extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                color: AppTheme.textMuted,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 2,

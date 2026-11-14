@@ -154,4 +154,29 @@ void main() {
 
     expect(provider.iconToEmoji(''), '🌡️');
   });
+
+  test('falls back to cached data and marks as stale when network fails', () async {
+    var callCount = 0;
+    final provider = WeatherProvider(
+      httpGet: (uri) async {
+        callCount++;
+        if (callCount == 1) {
+          return http.Response(
+            '{"current":{"temperature_2m":22.0,"relative_humidity_2m":50,"apparent_temperature":22.0,"weather_code":0,"wind_speed_10m":2.0},"daily":{"time":[],"temperature_2m_max":[],"temperature_2m_min":[],"weather_code":[]}}',
+            200,
+          );
+        }
+        throw Exception('Offline');
+      },
+    );
+
+    await provider.fetchWeather(apiKey: '', city: 'Cairo', lat: 30.06, lon: 31.25);
+    expect(provider.weatherData?.temperature, 22.0);
+    expect(provider.isStale, isFalse);
+
+    // Second call fails
+    await provider.fetchWeather(apiKey: '', city: 'Cairo', lat: 30.06, lon: 31.25);
+    expect(provider.weatherData?.temperature, 22.0);
+    expect(provider.isStale, isTrue);
+  });
 }

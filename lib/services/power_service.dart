@@ -26,12 +26,18 @@ class PowerCommand {
   }
 }
 
-Future<void> runPowerAction(PowerAction action) async {
+Future<void> runPowerAction(
+  PowerAction action, {
+  Future<Process> Function(String, List<String>, {bool runInShell})? processStarter,
+}) async {
   final command = PowerCommand.forAction(action);
-  final process = await Process.start(
+  final starter = processStarter ??
+      ((exe, args, {bool runInShell = false}) =>
+          Process.start(exe, args, runInShell: runInShell));
+  final process = await starter(
     command.executable,
     command.arguments,
-    runInShell: true,
+    runInShell: false,
   );
   final exitCode = await process.exitCode;
   if (exitCode != 0) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
@@ -67,9 +68,11 @@ class _AddWebsiteDialogState extends State<AddWebsiteDialog> {
         width: 400,
         padding: const EdgeInsets.all(28),
         decoration: BoxDecoration(
-          color: AppTheme.darkCard,
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppTheme.glassBorder),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
           boxShadow: [
             BoxShadow(
               color: AppTheme.neonPink.withValues(alpha: 0.1),
@@ -114,7 +117,10 @@ class _AddWebsiteDialogState extends State<AddWebsiteDialog> {
             // Color picker
             Text(
               'Color',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
             ),
             const SizedBox(height: 8),
             Wrap(
@@ -123,24 +129,17 @@ class _AddWebsiteDialogState extends State<AddWebsiteDialog> {
               children: _colors.map((hex) {
                 final color = Color(int.parse(hex.replaceFirst('#', '0xFF')));
                 final selected = _selectedColor == hex;
-                return GestureDetector(
+                return InkWell(
                   onTap: () => setState(() => _selectedColor = hex),
+                  customBorder: const CircleBorder(),
                   child: Container(
-                    width: 26,
-                    height: 26,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: color,
                       border: selected
                           ? Border.all(color: Colors.white, width: 2)
-                          : null,
-                      boxShadow: selected
-                          ? [
-                              BoxShadow(
-                                color: color.withValues(alpha: 0.7),
-                                blurRadius: 8,
-                              ),
-                            ]
                           : null,
                     ),
                     child: selected
@@ -165,7 +164,9 @@ class _AddWebsiteDialogState extends State<AddWebsiteDialog> {
                   child: Text(
                     'CANCEL',
                     style: TextStyle(
-                      color: AppTheme.textMuted,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                       fontSize: 11,
                       letterSpacing: 1.5,
                     ),
@@ -243,15 +244,26 @@ class _Field extends StatelessWidget {
       children: [
         Text(
           label,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
         ),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface,
+            fontSize: 13,
+          ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+            hintStyle: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+              fontSize: 13,
+            ),
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.05),
             border: OutlineInputBorder(

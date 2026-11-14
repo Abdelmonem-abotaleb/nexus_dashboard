@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:window_manager/window_manager.dart';
+
 import '../models/models.dart';
 import '../services/app_icon_service.dart';
 import '../theme/app_theme.dart';
@@ -87,9 +89,11 @@ class _AddAppDialogState extends State<AddAppDialog> {
         width: 420,
         padding: const EdgeInsets.all(28),
         decoration: BoxDecoration(
-          color: AppTheme.darkCard,
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppTheme.glassBorder),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
           boxShadow: [
             BoxShadow(
               color: AppTheme.neonBlue.withValues(alpha: 0.1),
@@ -130,7 +134,10 @@ class _AddAppDialogState extends State<AddAppDialog> {
               children: [
                 Text(
                   'Executable Path',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Row(
@@ -139,13 +146,16 @@ class _AddAppDialogState extends State<AddAppDialog> {
                       child: TextField(
                         controller: _pathController,
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontSize: 12,
                         ),
                         decoration: InputDecoration(
                           hintText: r'C:\Program Files\...\app.exe',
                           hintStyle: TextStyle(
-                            color: AppTheme.textMuted,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant
+                                .withValues(alpha: 0.72),
                             fontSize: 11,
                           ),
                           filled: true,
@@ -177,7 +187,7 @@ class _AddAppDialogState extends State<AddAppDialog> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    GestureDetector(
+                    InkWell(
                       onTap: () async {
                         final result = await _pickExecutable();
                         if (result != null &&
@@ -210,7 +220,7 @@ class _AddAppDialogState extends State<AddAppDialog> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    GestureDetector(
+                    InkWell(
                       onTap: () async {
                         final selectedApp =
                             await showDialog<Map<String, String>>(
@@ -252,7 +262,10 @@ class _AddAppDialogState extends State<AddAppDialog> {
             // Icon preview
             Text(
               'Icon',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
             ),
             const SizedBox(height: 8),
             Container(
@@ -261,16 +274,25 @@ class _AddAppDialogState extends State<AddAppDialog> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
                 color: Colors.white.withValues(alpha: 0.05),
-                border: Border.all(color: AppTheme.glassBorder),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
               ),
-              child: _iconPath.isNotEmpty && File(_iconPath).existsSync()
+              child: _iconPath.isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(File(_iconPath), fit: BoxFit.cover),
+                      child: Image.file(
+                        File(_iconPath),
+                        fit: BoxFit.cover,
+                        cacheWidth: 104,
+                        cacheHeight: 104,
+                        errorBuilder: (_, _, _) =>
+                            const Icon(Icons.apps_rounded, size: 28),
+                      ),
                     )
                   : Icon(
                       Icons.apps_rounded,
-                      color: AppTheme.textSecondary,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       size: 28,
                     ),
             ),
@@ -286,7 +308,9 @@ class _AddAppDialogState extends State<AddAppDialog> {
                   child: Text(
                     'CANCEL',
                     style: TextStyle(
-                      color: AppTheme.textMuted,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                       fontSize: 11,
                       letterSpacing: 1.5,
                     ),
@@ -384,15 +408,26 @@ class _DialogTextField extends StatelessWidget {
       children: [
         Text(
           label,
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
         ),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface,
+            fontSize: 13,
+          ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+            hintStyle: TextStyle(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+              fontSize: 13,
+            ),
             filled: true,
             fillColor: Colors.white.withValues(alpha: 0.05),
             border: OutlineInputBorder(
@@ -535,9 +570,11 @@ class _InstalledAppsPickerDialogState
         height: 520,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: AppTheme.darkCard,
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppTheme.glassBorder),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
           boxShadow: [
             BoxShadow(
               color: AppTheme.neonGreen.withValues(alpha: 0.1),
@@ -570,13 +607,21 @@ class _InstalledAppsPickerDialogState
             // Search Box
             TextField(
               controller: _searchController,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 13,
+              ),
               decoration: InputDecoration(
                 hintText: 'Search installed apps (e.g. Codex)...',
-                hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                hintStyle: TextStyle(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+                  fontSize: 12,
+                ),
                 prefixIcon: Icon(
                   Icons.search_rounded,
-                  color: AppTheme.textSecondary,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   size: 18,
                 ),
                 filled: true,
@@ -621,7 +666,9 @@ class _InstalledAppsPickerDialogState
                           Text(
                             'Scanning applications...',
                             style: TextStyle(
-                              color: AppTheme.textSecondary,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                               fontSize: 12,
                             ),
                           ),
@@ -633,7 +680,8 @@ class _InstalledAppsPickerDialogState
                       child: Text(
                         'No applications found',
                         style: TextStyle(
-                          color: AppTheme.textMuted,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.72),
                           fontSize: 13,
                         ),
                       ),
@@ -665,7 +713,9 @@ class _InstalledAppsPickerDialogState
                   child: Text(
                     'CLOSE',
                     style: TextStyle(
-                      color: AppTheme.textMuted,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
                       fontSize: 11,
                       letterSpacing: 1.5,
                     ),
@@ -705,8 +755,9 @@ class _AppListTileState extends State<_AppListTile> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
+      child: InkWell(
         onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(8),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           margin: const EdgeInsets.only(bottom: 6),
@@ -748,7 +799,7 @@ class _AppListTileState extends State<_AppListTile> {
                     Text(
                       widget.name,
                       style: TextStyle(
-                        color: AppTheme.textPrimary,
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
@@ -759,7 +810,7 @@ class _AppListTileState extends State<_AppListTile> {
                     Text(
                       widget.appId,
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 10,
                         fontFamily: 'monospace',
                       ),

@@ -1,10 +1,17 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_acrylic/flutter_acrylic.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:system_theme/system_theme.dart';
+
 import '../models/models.dart';
 import '../services/app_icon_service.dart';
+import '../services/dashboard_grid_service.dart';
+import '../services/notification_service.dart';
 
 enum ThemeModePreference {
   system,
@@ -31,32 +38,21 @@ enum ThemeModePreference {
 
 class DashboardProvider extends ChangeNotifier {
   static const backgroundRotationMinuteOptions = [1, 2, 5, 10, 15];
+  static const layoutSchemaVersion = 3;
 
   static const defaultWidgetOrder = [
     'clock',
     'weather',
+    'agenda',
+    'apps',
+    'todos',
     'prayerTimes',
     'system',
-    'todos',
-    'apps',
+    'power',
     'websites',
-    'shutdown',
-    'restart',
-    'sleep',
   ];
 
-  static const Map<String, DashboardWidgetLayout> defaultWidgetLayouts = {
-    'clock': DashboardWidgetLayout(x: 0, y: 0, width: 3, height: 2),
-    'weather': DashboardWidgetLayout(x: 3, y: 0, width: 3, height: 3),
-    'prayerTimes': DashboardWidgetLayout(x: 7, y: 6, width: 5, height: 2),
-    'system': DashboardWidgetLayout(x: 6, y: 0, width: 3, height: 3),
-    'todos': DashboardWidgetLayout(x: 9, y: 0, width: 3, height: 3),
-    'apps': DashboardWidgetLayout(x: 0, y: 3, width: 7, height: 3),
-    'websites': DashboardWidgetLayout(x: 0, y: 6, width: 7, height: 2),
-    'shutdown': DashboardWidgetLayout(x: 7, y: 3, width: 2, height: 1),
-    'restart': DashboardWidgetLayout(x: 9, y: 3, width: 2, height: 1),
-    'sleep': DashboardWidgetLayout(x: 11, y: 3, width: 1, height: 1),
-  };
+  static const defaultDesktopWidgetEnabled = {'clock', 'weather', 'prayerTimes'};
 
   final SharedPreferences _prefs;
 
@@ -64,14 +60,16 @@ class DashboardProvider extends ChangeNotifier {
   List<WebShortcut> _websites = [];
   List<TodoItem> _todos = [];
 
-  List<String> _backgroundImagePaths = [];
-  List<String> _validBackgroundImagePaths = [];
+  List<String> _backgroundImagePaths = const [];
+  List<String> _validBackgroundImagePaths = const [];
   int _currentBackgroundImageIndex = 0;
   int _backgroundRotationMinutes = 2;
   List<int> _backgroundRotationOrder = [];
   final Random _backgroundRotationRandom = Random();
   String _userName = 'Abdo';
   String _accentColor = '#00D4FF';
+  bool _followSystemAccent = true;
+  String _backdropEffect = 'mica';
   bool _showSeconds = true;
   bool _use24Hour = true;
   ThemeModePreference _themeModePreference = ThemeModePreference.dark;
@@ -92,13 +90,20 @@ class DashboardProvider extends ChangeNotifier {
   double _glassIntensity = 1.0;
   List<String> _widgetOrder = List.of(defaultWidgetOrder);
   Set<String> _disabledWidgetIds = {};
-  Map<String, String> _widgetSizes = {};
-  Map<String, DashboardWidgetLayout> _widgetLayouts = Map.of(
-    defaultWidgetLayouts,
-  );
+  Map<LayoutBreakpoint, List<DashboardWidgetPlacement>> _placements = const {};
+  int _layoutRevision = 0;
   bool _weatherMetricUnits = true;
   int _weatherRefreshMinutes = 15;
   bool _lowResourceMode = false;
+  bool _desktopWidgetMode = false;
+  List<String> _desktopWidgetOrder = List.of(defaultWidgetOrder);
+  Set<String> _desktopWidgetEnabledIds = Set.of(defaultDesktopWidgetEnabled);
+  bool _desktopWidgetAlwaysOnTop = false;
+  bool _desktopWidgetHideFromTaskbar = true;
+  bool _desktopWidgetLockPosition = false;
+  double _desktopWidgetOpacity = 0.94;
+  Rect? _dashboardWindowBounds;
+  Rect? _desktopWidgetWindowBounds;
 
   DashboardProvider(this._prefs) {
     _loadData();
@@ -108,10 +113,8 @@ class DashboardProvider extends ChangeNotifier {
   List<AppShortcut> get apps => _apps;
   List<WebShortcut> get websites => _websites;
   List<TodoItem> get todos => _todos;
-  List<String> get backgroundImagePaths =>
-      List.unmodifiable(_backgroundImagePaths);
-  List<String> get validBackgroundImagePaths =>
-      List.unmodifiable(_validBackgroundImagePaths);
+  List<String> get backgroundImagePaths => _backgroundImagePaths;
+  List<String> get validBackgroundImagePaths => _validBackgroundImagePaths;
   int get backgroundRotationMinutes => _backgroundRotationMinutes;
   String get currentBackgroundImagePath {
     if (_backgroundImagePaths.isEmpty) return '';
@@ -145,11 +148,35 @@ class DashboardProvider extends ChangeNotifier {
   double get blurStrength => _blurStrength;
   double get glassIntensity => _glassIntensity;
   List<String> get widgetOrder => List.unmodifiable(_widgetOrder);
+  List<DashboardWidgetPlacement> placementsFor(LayoutBreakpoint breakpoint) =>
+      _placements[breakpoint] ?? DashboardGridService.defaults(breakpoint);
+  int get layoutRevision => _layoutRevision;
+  void _bumpLayoutRevision() => _layoutRevision++;
   bool get weatherMetricUnits => _weatherMetricUnits;
   int get weatherRefreshMinutes => _weatherRefreshMinutes;
   bool get lowResourceMode => _lowResourceMode;
+  bool get desktopWidgetMode => _desktopWidgetMode;
+  List<String> get desktopWidgetOrder => List.unmodifiable(_desktopWidgetOrder);
+  bool isDesktopWidgetEnabled(String id) =>
+      _desktopWidgetEnabledIds.contains(id);
+  List<String> get visibleDesktopWidgetOrder =>
+      _desktopWidgetOrder.where(isDesktopWidgetEnabled).toList();
+  bool get desktopWidgetAlwaysOnTop => _desktopWidgetAlwaysOnTop;
+  bool get desktopWidgetHideFromTaskbar => _desktopWidgetHideFromTaskbar;
+  bool get desktopWidgetLockPosition => _desktopWidgetLockPosition;
+  double get desktopWidgetOpacity => _desktopWidgetOpacity;
+  Rect? get dashboardWindowBounds => _dashboardWindowBounds;
+  Rect? get desktopWidgetWindowBounds => _desktopWidgetWindowBounds;
+
+  bool get followSystemAccent => _followSystemAccent;
+  String get backdropEffect => _backdropEffect;
 
   Color get accentColorValue {
+    if (_followSystemAccent && Platform.isWindows) {
+      try {
+        return SystemTheme.accentColor.accent;
+      } catch (_) {}
+    }
     try {
       return Color(int.parse(_accentColor.replaceFirst('#', '0xFF')));
     } catch (_) {
@@ -167,17 +194,30 @@ class DashboardProvider extends ChangeNotifier {
   void _loadData() {
     // Load apps
     final appsJson = _prefs.getStringList('apps') ?? [];
-    _apps = appsJson.map((s) => AppShortcut.fromJson(jsonDecode(s))).toList();
+    _apps = List.unmodifiable(
+      appsJson.map((s) => AppShortcut.fromJson(jsonDecode(s))),
+    );
 
     // Load websites
     final websitesJson = _prefs.getStringList('websites') ?? [];
-    _websites = websitesJson
-        .map((s) => WebShortcut.fromJson(jsonDecode(s)))
-        .toList();
+    _websites = List.unmodifiable(
+      websitesJson.map((s) => WebShortcut.fromJson(jsonDecode(s))),
+    );
 
     // Load todos
     final todosJson = _prefs.getStringList('todos') ?? [];
-    _todos = todosJson.map((s) => TodoItem.fromJson(jsonDecode(s))).toList();
+    _todos = List.unmodifiable(
+      todosJson.map((s) => TodoItem.fromJson(jsonDecode(s))),
+    );
+    for (final todo in _todos) {
+      if (todo.remind && todo.dueAt != null && !todo.completed) {
+        NotificationService.instance.scheduleTodoReminder(
+          todoId: todo.id,
+          title: todo.text,
+          dueAt: todo.dueAt!,
+        );
+      }
+    }
 
     // Load settings
     _backgroundImagePaths = _normalizeBackgroundImagePaths(
@@ -185,7 +225,7 @@ class DashboardProvider extends ChangeNotifier {
     );
     final legacyBackgroundImage = _prefs.getString('backgroundImage') ?? '';
     if (_backgroundImagePaths.isEmpty && legacyBackgroundImage.isNotEmpty) {
-      _backgroundImagePaths = [legacyBackgroundImage];
+      _backgroundImagePaths = List.unmodifiable([legacyBackgroundImage]);
       _prefs.setStringList('backgroundImages', _backgroundImagePaths);
     }
     _refreshValidBackgroundImages();
@@ -197,6 +237,16 @@ class DashboardProvider extends ChangeNotifier {
         ? 'Abdo'
         : savedUserName;
     _accentColor = _prefs.getString('accentColor') ?? '#00D4FF';
+    _followSystemAccent = _prefs.getBool('followSystemAccent') ?? true;
+    _backdropEffect = _prefs.getString('backdropEffect') ?? 'mica';
+    _applyBackdropEffect();
+    if (Platform.isWindows) {
+      SystemTheme.onChange.listen((_) {
+        if (_followSystemAccent) {
+          notifyListeners();
+        }
+      });
+    }
     _showSeconds = _prefs.getBool('showSeconds') ?? true;
     _use24Hour = _prefs.getBool('use24Hour') ?? true;
     _themeModePreference = _loadThemeModePreference();
@@ -214,18 +264,11 @@ class DashboardProvider extends ChangeNotifier {
     _backgroundDim = _prefs.getDouble('backgroundDim') ?? 0.7;
     _blurStrength = _prefs.getDouble('blurStrength') ?? 4.0;
     _glassIntensity = _prefs.getDouble('glassIntensity') ?? 1.0;
-    _disabledWidgetIds = (_prefs.getStringList('disabledWidgets') ?? [])
-        .toSet();
-    _widgetOrder = _normalizeWidgetOrder(
-      _prefs.getStringList('widgetOrder') ?? defaultWidgetOrder,
-    );
-    _widgetSizes = _loadWidgetSizes(_prefs.getStringList('widgetSizes') ?? []);
-    _widgetLayouts = _loadWidgetLayouts(
-      _prefs.getStringList('widgetLayouts') ?? [],
-    );
+    _loadLayoutPreferences();
     _weatherMetricUnits = _prefs.getBool('weatherMetricUnits') ?? true;
     _weatherRefreshMinutes = _prefs.getInt('weatherRefreshMinutes') ?? 15;
     _lowResourceMode = _prefs.getBool('lowResourceMode') ?? false;
+    _loadDesktopWidgetPreferences();
 
     // Add demo data if first launch
     if (_apps.isEmpty) _loadDemoApps();
@@ -233,6 +276,83 @@ class DashboardProvider extends ChangeNotifier {
     _hydrateMissingAppIcons();
 
     notifyListeners();
+  }
+
+  void _loadLayoutPreferences() {
+    final savedDisabled = (_prefs.getStringList('disabledWidgets') ?? [])
+        .toSet();
+    final savedVersion = _prefs.getInt('layoutSchemaVersion') ?? 1;
+    if (savedVersion < 2) {
+      _widgetOrder = List.of(defaultWidgetOrder);
+      _disabledWidgetIds = savedDisabled
+          .where(defaultWidgetOrder.contains)
+          .toSet();
+      final allLegacyPowerActionsDisabled = const {
+        'shutdown',
+        'restart',
+        'sleep',
+      }.every(savedDisabled.contains);
+      if (allLegacyPowerActionsDisabled) _disabledWidgetIds.add('power');
+      _prefs
+        ..setStringList('widgetOrder', _widgetOrder)
+        ..setStringList('disabledWidgets', _disabledWidgetIds.toList())
+        ..remove('widgetSizes')
+        ..remove('widgetLayouts');
+    } else {
+      _disabledWidgetIds = savedDisabled
+          .where(defaultWidgetOrder.contains)
+          .toSet();
+      _widgetOrder = _normalizeWidgetOrder(
+        _prefs.getStringList('widgetOrder') ?? defaultWidgetOrder,
+      );
+    }
+
+    _placements = Map.unmodifiable({
+      for (final breakpoint in LayoutBreakpoint.values)
+        breakpoint: savedVersion < 3
+            ? DashboardGridService.defaults(breakpoint)
+            : _loadPlacements(breakpoint),
+    });
+    if (savedVersion < layoutSchemaVersion) {
+      for (final breakpoint in LayoutBreakpoint.values) {
+        _savePlacements(breakpoint);
+      }
+      _prefs.setInt('layoutSchemaVersion', layoutSchemaVersion);
+    }
+  }
+
+  List<DashboardWidgetPlacement> _loadPlacements(LayoutBreakpoint breakpoint) {
+    final loaded = <DashboardWidgetPlacement>[];
+    for (final encoded in _prefs.getStringList(breakpoint.storageKey) ?? []) {
+      try {
+        final json = jsonDecode(encoded);
+        if (json is Map<String, dynamic>) {
+          final placement = DashboardWidgetPlacement.fromJson(json);
+          if (defaultWidgetOrder.contains(placement.id) &&
+              !loaded.any((item) => item.id == placement.id)) {
+            loaded.add(placement);
+          }
+        }
+      } catch (_) {
+        // Skip malformed placement records without blocking startup.
+      }
+    }
+    final defaults = DashboardGridService.defaults(breakpoint);
+    for (final placement in defaults) {
+      if (!loaded.any((item) => item.id == placement.id)) {
+        loaded.add(placement);
+      }
+    }
+    return DashboardGridService.normalize(loaded, breakpoint);
+  }
+
+  Future<void> _savePlacements(LayoutBreakpoint breakpoint) async {
+    await _prefs.setStringList(
+      breakpoint.storageKey,
+      placementsFor(
+        breakpoint,
+      ).map((item) => jsonEncode(item.toJson())).toList(),
+    );
   }
 
   Future<void> _saveApps() async {
@@ -266,46 +386,7 @@ class DashboardProvider extends ChangeNotifier {
     for (final id in defaultWidgetOrder) {
       if (!normalized.contains(id)) normalized.add(id);
     }
-    return normalized;
-  }
-
-  Map<String, String> _loadWidgetSizes(List<String> entries) {
-    final sizes = <String, String>{};
-    for (final entry in entries) {
-      final parts = entry.split(':');
-      if (parts.length != 2) continue;
-      if (!defaultWidgetOrder.contains(parts[0])) continue;
-      if (!['compact', 'normal', 'large'].contains(parts[1])) continue;
-      sizes[parts[0]] = parts[1];
-    }
-    return sizes;
-  }
-
-  Map<String, DashboardWidgetLayout> _loadWidgetLayouts(List<String> entries) {
-    final layouts = Map<String, DashboardWidgetLayout>.of(defaultWidgetLayouts);
-    for (final entry in entries) {
-      try {
-        final decoded = jsonDecode(entry);
-        if (decoded is! Map<String, dynamic>) continue;
-        final id = decoded['id'] as String?;
-        if (id == null || !defaultWidgetOrder.contains(id)) continue;
-        layouts[id] = _sanitizeWidgetLayout(
-          DashboardWidgetLayout.fromJson(decoded),
-        );
-      } catch (_) {
-        continue;
-      }
-    }
-    return layouts;
-  }
-
-  DashboardWidgetLayout _sanitizeWidgetLayout(DashboardWidgetLayout layout) {
-    return DashboardWidgetLayout(
-      x: layout.x.clamp(0, 11),
-      y: layout.y.clamp(0, 60),
-      width: layout.width.clamp(1, 12),
-      height: layout.height.clamp(1, 12),
-    );
+    return List.unmodifiable(normalized);
   }
 
   ThemeModePreference _loadThemeModePreference() {
@@ -317,24 +398,6 @@ class DashboardProvider extends ChangeNotifier {
     return legacyDarkMode
         ? ThemeModePreference.dark
         : ThemeModePreference.light;
-  }
-
-  Future<void> _saveWidgetSizes() async {
-    await _prefs.setStringList(
-      'widgetSizes',
-      _widgetSizes.entries.map((e) => '${e.key}:${e.value}').toList(),
-    );
-  }
-
-  Future<void> _saveWidgetLayouts() async {
-    await _prefs.setStringList(
-      'widgetLayouts',
-      _widgetLayouts.entries
-          .map(
-            (entry) => jsonEncode({'id': entry.key, ...entry.value.toJson()}),
-          )
-          .toList(),
-    );
   }
 
   List<String> _normalizeBackgroundImagePaths(List<String> paths) {
@@ -358,9 +421,9 @@ class DashboardProvider extends ChangeNotifier {
 
   void _refreshValidBackgroundImages({bool Function(String path)? fileExists}) {
     final exists = fileExists ?? (path) => File(path).existsSync();
-    _validBackgroundImagePaths = _backgroundImagePaths
-        .where((path) => exists(path))
-        .toList();
+    _validBackgroundImagePaths = List.unmodifiable(
+      _backgroundImagePaths.where((path) => exists(path)),
+    );
   }
 
   void _resetBackgroundRotationOrder() {
@@ -373,7 +436,7 @@ class DashboardProvider extends ChangeNotifier {
 
   // ─── Demo Data ────────────────────────────────────────────────────────────
   void _loadDemoApps() {
-    _apps = [
+    _apps = List.unmodifiable([
       AppShortcut(
         id: '1',
         name: 'Chrome',
@@ -401,12 +464,12 @@ class DashboardProvider extends ChangeNotifier {
         executablePath: r'C:\Users\%USERNAME%\AppData\Local\Discord\Update.exe',
         color: '#5865F2',
       ),
-    ];
+    ]);
     _saveApps();
   }
 
   void _loadDemoWebsites() {
-    _websites = [
+    _websites = List.unmodifiable([
       WebShortcut(
         id: '1',
         name: 'YouTube',
@@ -431,26 +494,31 @@ class DashboardProvider extends ChangeNotifier {
         url: 'https://reddit.com',
         color: '#FF4500',
       ),
-    ];
+    ]);
     _saveWebsites();
   }
 
   Future<void> _hydrateMissingAppIcons() async {
     var changed = false;
-    for (final app in _apps) {
-      if (app.iconPath.isNotEmpty && File(app.iconPath).existsSync()) {
-        continue;
-      }
-      final iconPath = await extractWindowsAppIcon(
-        executablePath: app.executablePath,
-        appId: app.id,
-      );
-      if (iconPath.isEmpty) continue;
-      app.iconPath = iconPath;
-      changed = true;
-    }
+    final hydrated = await Future.wait(
+      _apps.map((app) async {
+        if (app.iconPath.isNotEmpty && File(app.iconPath).existsSync()) {
+          return app;
+        }
+        final iconPath = await extractWindowsAppIcon(
+          executablePath: app.executablePath,
+          appId: app.id,
+        );
+        if (iconPath.isNotEmpty && iconPath != app.iconPath) {
+          changed = true;
+          return app.copyWith(iconPath: iconPath);
+        }
+        return app;
+      }),
+    );
 
     if (!changed) return;
+    _apps = List.unmodifiable(hydrated);
     await _saveApps();
     notifyListeners();
   }
@@ -458,12 +526,13 @@ class DashboardProvider extends ChangeNotifier {
   // ─── Edit Mode ────────────────────────────────────────────────────────────
   void toggleEditMode() {
     _isEditMode = !_isEditMode;
+    _bumpLayoutRevision();
     notifyListeners();
   }
 
   // ─── App Management ───────────────────────────────────────────────────────
   void addApp(AppShortcut app) {
-    _apps.add(app);
+    _apps = List.unmodifiable([..._apps, app]);
     _saveApps();
     notifyListeners();
   }
@@ -471,29 +540,32 @@ class DashboardProvider extends ChangeNotifier {
   void updateApp(AppShortcut app) {
     final idx = _apps.indexWhere((a) => a.id == app.id);
     if (idx != -1) {
-      _apps[idx] = app;
+      final updated = [..._apps]..[idx] = app;
+      _apps = List.unmodifiable(updated);
       _saveApps();
       notifyListeners();
     }
   }
 
   void removeApp(String id) {
-    _apps.removeWhere((a) => a.id == id);
+    _apps = List.unmodifiable(_apps.where((a) => a.id != id));
     _saveApps();
     notifyListeners();
   }
 
   void reorderApps(int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex--;
-    final item = _apps.removeAt(oldIndex);
-    _apps.insert(newIndex, item);
+    final updated = [..._apps];
+    final item = updated.removeAt(oldIndex);
+    updated.insert(newIndex, item);
+    _apps = List.unmodifiable(updated);
     _saveApps();
     notifyListeners();
   }
 
   // ─── Website Management ───────────────────────────────────────────────────
   void addWebsite(WebShortcut site) {
-    _websites.add(site);
+    _websites = List.unmodifiable([..._websites, site]);
     _saveWebsites();
     notifyListeners();
   }
@@ -501,14 +573,15 @@ class DashboardProvider extends ChangeNotifier {
   void updateWebsite(WebShortcut site) {
     final idx = _websites.indexWhere((w) => w.id == site.id);
     if (idx != -1) {
-      _websites[idx] = site;
+      final updated = [..._websites]..[idx] = site;
+      _websites = List.unmodifiable(updated);
       _saveWebsites();
       notifyListeners();
     }
   }
 
   void removeWebsite(String id) {
-    _websites.removeWhere((w) => w.id == id);
+    _websites = List.unmodifiable(_websites.where((w) => w.id != id));
     _saveWebsites();
     notifyListeners();
   }
@@ -517,43 +590,78 @@ class DashboardProvider extends ChangeNotifier {
     if (oldIndex < 0 || oldIndex >= _websites.length) return;
     if (newIndex < 0 || newIndex > _websites.length) return;
     if (newIndex > oldIndex) newIndex--;
-    final item = _websites.removeAt(oldIndex);
-    _websites.insert(newIndex, item);
+    final updated = [..._websites];
+    final item = updated.removeAt(oldIndex);
+    updated.insert(newIndex, item);
+    _websites = List.unmodifiable(updated);
     _saveWebsites();
     notifyListeners();
   }
 
   // ─── Todo Management ──────────────────────────────────────────────────────
-  void addTodo(String text) {
-    if (text.trim().isEmpty) return;
-    _todos.insert(
-      0,
-      TodoItem(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: text.trim(),
-      ),
-    );
+  void addTodoItem(TodoItem item) {
+    if (item.text.trim().isEmpty) return;
+    _todos = List.unmodifiable([item, ..._todos]);
     _saveTodos();
+    if (item.remind && item.dueAt != null && !item.completed) {
+      NotificationService.instance.scheduleTodoReminder(
+        todoId: item.id,
+        title: item.text,
+        dueAt: item.dueAt!,
+      );
+    }
     notifyListeners();
+  }
+
+  void addTodo(
+    String text, {
+    DateTime? dueAt,
+    TodoPriority priority = TodoPriority.none,
+    bool remind = false,
+  }) {
+    if (text.trim().isEmpty) return;
+    final item = TodoItem(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      text: text.trim(),
+      dueAt: dueAt,
+      priority: priority,
+      remind: remind,
+    );
+    addTodoItem(item);
   }
 
   void toggleTodo(String id) {
     final index = _todos.indexWhere((t) => t.id == id);
     if (index == -1) return;
-    final todo = _todos[index];
-    todo.completed = !todo.completed;
+    final updated = [..._todos];
+    final nextState = !updated[index].completed;
+    updated[index] = updated[index].copyWith(completed: nextState);
+    if (nextState) {
+      NotificationService.instance.cancelReminder(id);
+    } else if (updated[index].remind && updated[index].dueAt != null) {
+      NotificationService.instance.scheduleTodoReminder(
+        todoId: id,
+        title: updated[index].text,
+        dueAt: updated[index].dueAt!,
+      );
+    }
+    _todos = List.unmodifiable(updated);
     _saveTodos();
     notifyListeners();
   }
 
   void deleteTodo(String id) {
-    _todos.removeWhere((t) => t.id == id);
+    NotificationService.instance.cancelReminder(id);
+    _todos = List.unmodifiable(_todos.where((t) => t.id != id));
     _saveTodos();
     notifyListeners();
   }
 
   void clearCompletedTodos() {
-    _todos.removeWhere((t) => t.completed);
+    for (final todo in _todos.where((t) => t.completed)) {
+      NotificationService.instance.cancelReminder(todo.id);
+    }
+    _todos = List.unmodifiable(_todos.where((t) => !t.completed));
     _saveTodos();
     notifyListeners();
   }
@@ -588,12 +696,41 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> clearBackgroundImages() async {
-    _backgroundImagePaths = [];
-    _validBackgroundImagePaths = [];
+    _backgroundImagePaths = const [];
+    _validBackgroundImagePaths = const [];
     _currentBackgroundImageIndex = 0;
     _backgroundRotationOrder = [];
     await _saveBackgroundImages();
     await _prefs.setString('backgroundImage', '');
+    notifyListeners();
+  }
+
+  Future<void> removeBackgroundImage(String path) async {
+    final removedIndex = _backgroundImagePaths.indexOf(path);
+    if (removedIndex < 0) return;
+    final wasCurrent = removedIndex == _currentBackgroundImageIndex;
+    _backgroundImagePaths = List.unmodifiable(
+      _backgroundImagePaths.where((item) => item != path),
+    );
+    _refreshValidBackgroundImages();
+    if (_backgroundImagePaths.isEmpty) {
+      _currentBackgroundImageIndex = 0;
+      _backgroundRotationOrder = [];
+    } else {
+      if (removedIndex < _currentBackgroundImageIndex) {
+        _currentBackgroundImageIndex--;
+      }
+      _currentBackgroundImageIndex = _currentBackgroundImageIndex.clamp(
+        0,
+        _backgroundImagePaths.length - 1,
+      );
+      _resetBackgroundRotationOrder();
+      if (wasCurrent && _backgroundRotationOrder.isNotEmpty) {
+        _currentBackgroundImageIndex = _backgroundRotationOrder.removeAt(0);
+      }
+    }
+    await _saveBackgroundImages();
+    await _prefs.setString('backgroundImage', currentBackgroundImagePath);
     notifyListeners();
   }
 
@@ -617,6 +754,7 @@ class DashboardProvider extends ChangeNotifier {
     }
     if (_backgroundRotationOrder.isEmpty) return;
     _currentBackgroundImageIndex = _backgroundRotationOrder.removeAt(0);
+    _prefs.setString('backgroundImage', currentBackgroundImagePath);
     notifyListeners();
   }
 
@@ -628,8 +766,44 @@ class DashboardProvider extends ChangeNotifier {
 
   Future<void> setAccentColor(String hex) async {
     _accentColor = hex;
+    _followSystemAccent = false;
+    await _prefs.setBool('followSystemAccent', false);
     await _prefs.setString('accentColor', hex);
     notifyListeners();
+  }
+
+  Future<void> setFollowSystemAccent(bool value) async {
+    _followSystemAccent = value;
+    await _prefs.setBool('followSystemAccent', value);
+    notifyListeners();
+  }
+
+  Future<void> setBackdropEffect(String effect) async {
+    _backdropEffect = effect;
+    await _prefs.setString('backdropEffect', effect);
+    _applyBackdropEffect();
+    notifyListeners();
+  }
+
+  void _applyBackdropEffect() {
+    if (!Platform.isWindows) return;
+    try {
+      final effect = switch (_backdropEffect) {
+        'acrylic' => WindowEffect.acrylic,
+        'solid' => WindowEffect.solid,
+        'tabbed' => WindowEffect.tabbed,
+        _ => WindowEffect.mica,
+      };
+      Window.setEffect(
+        effect: effect,
+        dark: _themeModePreference == ThemeModePreference.dark ||
+            (_themeModePreference == ThemeModePreference.system &&
+                (PlatformDispatcher.instance.platformBrightness ==
+                    Brightness.dark)),
+      );
+    } catch (e) {
+      debugPrint('Failed to apply backdrop effect: $e');
+    }
   }
 
   Future<void> setShowSeconds(bool value) async {
@@ -650,6 +824,7 @@ class DashboardProvider extends ChangeNotifier {
         : ThemeModePreference.light;
     await _prefs.setBool('useDarkMode', value);
     await _prefs.setString('themeModePreference', _themeModePreference.name);
+    _applyBackdropEffect();
     notifyListeners();
   }
 
@@ -657,6 +832,7 @@ class DashboardProvider extends ChangeNotifier {
     _themeModePreference = value;
     await _prefs.setString('themeModePreference', value.name);
     await _prefs.setBool('useDarkMode', value == ThemeModePreference.dark);
+    _applyBackdropEffect();
     notifyListeners();
   }
 
@@ -755,30 +931,39 @@ class DashboardProvider extends ChangeNotifier {
     if (oldIndex < 0 || oldIndex >= _widgetOrder.length) return;
     if (newIndex < 0 || newIndex > _widgetOrder.length) return;
     if (newIndex > oldIndex) newIndex--;
-    final item = _widgetOrder.removeAt(oldIndex);
-    _widgetOrder.insert(newIndex, item);
+    final updated = [..._widgetOrder];
+    final item = updated.removeAt(oldIndex);
+    updated.insert(newIndex, item);
+    _widgetOrder = List.unmodifiable(updated);
     _prefs.setStringList('widgetOrder', _widgetOrder);
     notifyListeners();
   }
 
-  String widgetSize(String id) => _widgetSizes[id] ?? 'normal';
-
-  DashboardWidgetLayout widgetLayout(String id) {
-    return _widgetLayouts[id] ?? defaultWidgetLayouts[id]!;
-  }
-
-  Future<void> setWidgetLayout(String id, DashboardWidgetLayout layout) async {
-    if (!defaultWidgetOrder.contains(id)) return;
-    _widgetLayouts[id] = _sanitizeWidgetLayout(layout);
-    await _saveWidgetLayouts();
+  Future<void> updateWidgetPlacement(
+    LayoutBreakpoint breakpoint,
+    DashboardWidgetPlacement placement,
+  ) async {
+    if (!defaultWidgetOrder.contains(placement.id)) return;
+    final updated = DashboardGridService.reflow(
+      placements: placementsFor(breakpoint),
+      edited: placement,
+      breakpoint: breakpoint,
+    );
+    _placements = Map.unmodifiable({..._placements, breakpoint: updated});
+    _widgetOrder = List.unmodifiable(updated.map((item) => item.id));
+    _bumpLayoutRevision();
+    await _savePlacements(breakpoint);
+    await _prefs.setStringList('widgetOrder', _widgetOrder);
     notifyListeners();
   }
 
-  Future<void> setWidgetSize(String id, String size) async {
-    if (!defaultWidgetOrder.contains(id)) return;
-    if (!['compact', 'normal', 'large'].contains(size)) return;
-    _widgetSizes[id] = size;
-    await _saveWidgetSizes();
+  Future<void> resetWidgetPlacements(LayoutBreakpoint breakpoint) async {
+    final defaults = DashboardGridService.defaults(breakpoint);
+    _placements = Map.unmodifiable({..._placements, breakpoint: defaults});
+    _widgetOrder = List.unmodifiable(defaults.map((item) => item.id));
+    _bumpLayoutRevision();
+    await _savePlacements(breakpoint);
+    await _prefs.setStringList('widgetOrder', _widgetOrder);
     notifyListeners();
   }
 
@@ -810,6 +995,121 @@ class DashboardProvider extends ChangeNotifier {
     _weatherCity = city;
     await _prefs.setString('weatherCity', city);
     notifyListeners();
+  }
+
+  // ─── Desktop Widget Mode ──────────────────────────────────────────────────
+  void _loadDesktopWidgetPreferences() {
+    _desktopWidgetMode = _prefs.getBool('desktopWidgetMode') ?? false;
+    _desktopWidgetOrder = _normalizeWidgetOrder(
+      _prefs.getStringList('desktopWidgetOrder') ?? defaultWidgetOrder,
+    );
+    final savedEnabled = _prefs.getStringList('desktopWidgetEnabledIds');
+    _desktopWidgetEnabledIds = savedEnabled == null
+        ? Set.of(defaultDesktopWidgetEnabled)
+        : savedEnabled.where(defaultWidgetOrder.contains).toSet();
+    _desktopWidgetAlwaysOnTop =
+        _prefs.getBool('desktopWidgetAlwaysOnTop') ?? false;
+    _desktopWidgetHideFromTaskbar =
+        _prefs.getBool('desktopWidgetHideFromTaskbar') ?? true;
+    _desktopWidgetLockPosition =
+        _prefs.getBool('desktopWidgetLockPosition') ?? false;
+    _desktopWidgetOpacity = (_prefs.getDouble('desktopWidgetOpacity') ?? 0.94)
+        .clamp(0.25, 1.0);
+    _dashboardWindowBounds = _readWindowBounds('dashboardWin');
+    _desktopWidgetWindowBounds = _readWindowBounds('widgetWin');
+  }
+
+  Rect? _readWindowBounds(String prefix) {
+    final x = _prefs.getDouble('${prefix}X');
+    final y = _prefs.getDouble('${prefix}Y');
+    final w = _prefs.getDouble('${prefix}W');
+    final h = _prefs.getDouble('${prefix}H');
+    if (x == null || y == null || w == null || h == null) return null;
+    if (w <= 0 || h <= 0) return null;
+    return Rect.fromLTWH(x, y, w, h);
+  }
+
+  Future<void> _writeWindowBounds(String prefix, Rect bounds) async {
+    await _prefs.setDouble('${prefix}X', bounds.left);
+    await _prefs.setDouble('${prefix}Y', bounds.top);
+    await _prefs.setDouble('${prefix}W', bounds.width);
+    await _prefs.setDouble('${prefix}H', bounds.height);
+  }
+
+  Future<void> setDesktopWidgetMode(bool value) async {
+    if (_desktopWidgetMode == value) return;
+    _desktopWidgetMode = value;
+    _isEditMode = false;
+    _bumpLayoutRevision();
+    await _prefs.setBool('desktopWidgetMode', value);
+    notifyListeners();
+  }
+
+  Future<void> toggleDesktopWidgetMode() =>
+      setDesktopWidgetMode(!_desktopWidgetMode);
+
+  Future<void> setDesktopWidgetEnabled(String id, bool value) async {
+    if (!defaultWidgetOrder.contains(id)) return;
+    if (value) {
+      _desktopWidgetEnabledIds.add(id);
+    } else {
+      _desktopWidgetEnabledIds.remove(id);
+    }
+    _bumpLayoutRevision();
+    await _prefs.setStringList(
+      'desktopWidgetEnabledIds',
+      _desktopWidgetEnabledIds.toList(),
+    );
+    notifyListeners();
+  }
+
+  void reorderDesktopWidget(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _desktopWidgetOrder.length) return;
+    if (newIndex < 0 || newIndex > _desktopWidgetOrder.length) return;
+    if (newIndex > oldIndex) newIndex--;
+    final updated = [..._desktopWidgetOrder];
+    final item = updated.removeAt(oldIndex);
+    updated.insert(newIndex, item);
+    _desktopWidgetOrder = List.unmodifiable(updated);
+    _bumpLayoutRevision();
+    _prefs.setStringList('desktopWidgetOrder', _desktopWidgetOrder);
+    notifyListeners();
+  }
+
+  Future<void> setDesktopWidgetAlwaysOnTop(bool value) async {
+    _desktopWidgetAlwaysOnTop = value;
+    await _prefs.setBool('desktopWidgetAlwaysOnTop', value);
+    notifyListeners();
+  }
+
+  Future<void> setDesktopWidgetHideFromTaskbar(bool value) async {
+    _desktopWidgetHideFromTaskbar = value;
+    await _prefs.setBool('desktopWidgetHideFromTaskbar', value);
+    notifyListeners();
+  }
+
+  Future<void> setDesktopWidgetLockPosition(bool value) async {
+    _desktopWidgetLockPosition = value;
+    await _prefs.setBool('desktopWidgetLockPosition', value);
+    notifyListeners();
+  }
+
+  Future<void> setDesktopWidgetOpacity(double value) async {
+    _desktopWidgetOpacity = value.clamp(0.25, 1.0);
+    await _prefs.setDouble('desktopWidgetOpacity', _desktopWidgetOpacity);
+    notifyListeners();
+  }
+
+  Future<void> saveDashboardWindowBounds(Rect bounds) async {
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    _dashboardWindowBounds = bounds;
+    await _writeWindowBounds('dashboardWin', bounds);
+  }
+
+  Future<void> saveDesktopWidgetWindowBounds(Rect bounds) async {
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    _desktopWidgetWindowBounds = bounds;
+    await _writeWindowBounds('widgetWin', bounds);
   }
 
   // Generate unique ID

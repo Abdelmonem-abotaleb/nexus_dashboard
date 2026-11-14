@@ -1,23 +1,36 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/material.dart';
-import '../models/models.dart';
 
-typedef ProcessStarter =
-    Future<Process> Function(
-      String executable,
-      List<String> arguments, {
-      String? workingDirectory,
-      Map<String, String>? environment,
-      bool includeParentEnvironment,
-      bool runInShell,
-      ProcessStartMode mode,
-    });
+import 'package:flutter/material.dart';
+
+import '../models/models.dart';
+import '../services/native_stats_service.dart';
+import 'window_activity_provider.dart';
+
+typedef ProcessStarter = Future<Process> Function(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+  Map<String, String>? environment,
+  bool includeParentEnvironment,
+  bool runInShell,
+  ProcessStartMode mode,
+});
 
 const Duration _windowsStatsTimeout = Duration(seconds: 8);
-const Duration systemStatsPollInterval = Duration(seconds: 30);
-const Duration systemHardwarePollInterval = Duration(minutes: 5);
+const Duration systemStatsPollInterval = Duration(seconds: 60);
+const Duration systemHardwarePollInterval = Duration(minutes: 15);
+
+Duration adaptiveStatsInterval(
+  ActivityLevel level, {
+  required bool lowResource,
+}) => switch (level) {
+  ActivityLevel.focused =>
+    lowResource ? const Duration(seconds: 5) : const Duration(seconds: 2),
+  ActivityLevel.visibleUnfocused => const Duration(seconds: 30),
+  ActivityLevel.hidden => Duration.zero,
+};
 
 ({double used, double total}) parseStatPair(
   String output, {
@@ -134,7 +147,9 @@ class SystemProvider extends ChangeNotifier {
   bool _fetching = false;
   bool _monitoringEnabled = false;
   bool _lowResourceMode = false;
+  ActivityLevel _activityLevel = ActivityLevel.focused;
   DateTime? _lastHardwareFetch;
+  DateTime? _lastDiskFetch;
   final String _hostname = Platform.localHostname.isNotEmpty
       ? Platform.localHostname
       : 'DESKTOP';
@@ -144,6 +159,7 @@ class SystemProvider extends ChangeNotifier {
   SystemStats get stats => _stats;
   double get cpuUsage => _cpuUsage;
   bool get monitoringEnabled => _monitoringEnabled;
+  ActivityLevel get activityLevel => _activityLevel;
 
   SystemProvider({
     bool monitoringEnabled = true,
@@ -160,7 +176,22 @@ class SystemProvider extends ChangeNotifier {
     if (_monitoringEnabled) return;
     _monitoringEnabled = true;
     _fetchStats();
-    _timer = Timer.periodic(systemStatsPollInterval, (_) => _fetchStats());
+    _scheduleNextPoll();
+  }
+
+  void _scheduleNextPoll() {
+    _timer?.cancel();
+    _timer = null;
+    if (!_monitoringEnabled || _activityLevel == ActivityLevel.hidden) return;
+    final interval = adaptiveStatsInterval(
+      _activityLevel,
+      lowResource: _lowResourceMode,
+    );
+    if (interval == Duration.zero) return;
+    _timer = Timer(interval, () async {
+      await _fetchStats();
+      _scheduleNextPoll();
+    });
   }
 
   void setMonitoringEnabled(bool enabled) {
@@ -174,14 +205,29 @@ class SystemProvider extends ChangeNotifier {
     _timer = null;
   }
 
+  void setActivityLevel(ActivityLevel level) {
+    if (_activityLevel == level) return;
+    _activityLevel = level;
+    if (_monitoringEnabled) {
+      if (level == ActivityLevel.hidden) {
+        _timer?.cancel();
+        _timer = null;
+      } else {
+        _scheduleNextPoll();
+      }
+    }
+  }
+
   void setLowResourceMode(bool enabled) {
     if (_lowResourceMode == enabled) return;
     _lowResourceMode = enabled;
+    _lastDiskFetch = null;
     if (!enabled) {
       _lastHardwareFetch = null;
     }
     if (_monitoringEnabled) {
       _fetchStats();
+      _scheduleNextPoll();
     }
   }
 
@@ -209,21 +255,51 @@ class SystemProvider extends ChangeNotifier {
 
   Future<bool> _fetchWindowsStats() async {
     try {
-      final fast = await _fetchWindowsFastStats();
-      if (!_lowResourceMode && _shouldFetchHardwareStats()) {
-        await _fetchWindowsHardwareStats();
+      final isCustomStarter = _processStarter != Process.start;
+      final nativeCpu = isCustomStarter
+          ? null
+          : NativeStatsService.instance.getCpuUsage();
+      final nativeMem = isCustomStarter
+          ? null
+          : NativeStatsService.instance.getMemoryUsage();
+      final now = _now();
+      final needsDiskOrFull = isCustomStarter ||
+          nativeCpu == null ||
+          nativeMem == null ||
+          _stats.disks.isEmpty ||
+          _lastDiskFetch == null ||
+          now.difference(_lastDiskFetch!) >= const Duration(seconds: 30);
+
+      if (needsDiskOrFull) {
+        final fast = await _fetchWindowsFastStats();
+        _lastDiskFetch = now;
+        if (!_lowResourceMode && _shouldFetchHardwareStats()) {
+          await _fetchWindowsHardwareStats();
+        }
+        _cpuUsage = nativeCpu ?? fast.cpuUsage;
+        _stats = SystemStats(
+          cpuUsage: nativeCpu ?? fast.cpuUsage,
+          cpuTemperatureC: _lowResourceMode ? null : _cachedCpuTemperatureC,
+          gpus: _lowResourceMode ? const [] : _cachedGpus,
+          ramUsage: nativeMem?.usedGb ?? fast.ramUsage,
+          ramTotal: nativeMem?.totalGb ?? fast.ramTotal,
+          disks: fast.disks,
+          osName: fast.osName,
+          hostname: _hostname,
+        );
+      } else {
+        _cpuUsage = nativeCpu;
+        _stats = SystemStats(
+          cpuUsage: nativeCpu,
+          cpuTemperatureC: _lowResourceMode ? null : _cachedCpuTemperatureC,
+          gpus: _lowResourceMode ? const [] : _cachedGpus,
+          ramUsage: nativeMem.usedGb,
+          ramTotal: nativeMem.totalGb,
+          disks: _stats.disks,
+          osName: _stats.osName.isNotEmpty ? _stats.osName : 'Windows',
+          hostname: _hostname,
+        );
       }
-      _cpuUsage = fast.cpuUsage;
-      _stats = SystemStats(
-        cpuUsage: fast.cpuUsage,
-        cpuTemperatureC: _lowResourceMode ? null : _cachedCpuTemperatureC,
-        gpus: _lowResourceMode ? const [] : _cachedGpus,
-        ramUsage: fast.ramUsage,
-        ramTotal: fast.ramTotal,
-        disks: fast.disks,
-        osName: fast.osName,
-        hostname: _hostname,
-      );
       return true;
     } catch (e) {
       // Keep last known stats

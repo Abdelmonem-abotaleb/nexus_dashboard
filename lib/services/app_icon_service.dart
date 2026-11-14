@@ -15,31 +15,52 @@ bool isAppxAppUserModelId(String path) {
   return path.contains('!') && !path.contains('\\') && !path.contains('/');
 }
 
+String _computePathHash(String input) {
+  var hash = 0xcbf29ce484222325;
+  for (final unit in input.codeUnits) {
+    hash ^= unit;
+    hash = (hash * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
+  }
+  return hash.toRadixString(16);
+}
+
+String iconCacheKey(String targetPath, String appId) {
+  final norm = targetPath.trim().toLowerCase();
+  final hash = _computePathHash(norm);
+  final safeId = appId.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+  return '${safeId}_$hash';
+}
+
+final Map<String, Future<String>> _inFlightIconExtractions = {};
+
 Future<String> extractWindowsAppIcon({
   required String executablePath,
   required String appId,
-}) async {
-  if (!Platform.isWindows) return '';
+}) {
+  if (!Platform.isWindows) return Future.value('');
 
   final resolvedPath = resolveWindowsPath(executablePath);
-  if (isAppxAppUserModelId(resolvedPath)) {
-    return _extractWindowsStoreAppIcon(
-      appUserModelId: resolvedPath,
-      appId: appId,
-    );
-  }
-  if (isUwpOrProtocol(resolvedPath)) {
-    return resolvedPath.contains(':')
-        ? ''
-        : _extractWindowsShellShortcutIcon(
-            appUserModelId: resolvedPath,
-            appId: appId,
-          );
-  }
-  if (!File(resolvedPath).existsSync()) {
-    return '';
-  }
+  final key = iconCacheKey(resolvedPath, appId);
+  final inFlight = _inFlightIconExtractions[key];
+  if (inFlight != null) return inFlight;
 
+  final future = _extractWindowsAppIconInternal(
+    executablePath: executablePath,
+    resolvedPath: resolvedPath,
+    appId: appId,
+    cacheKey: key,
+  );
+  _inFlightIconExtractions[key] = future;
+  future.whenComplete(() => _inFlightIconExtractions.remove(key));
+  return future;
+}
+
+Future<String> _extractWindowsAppIconInternal({
+  required String executablePath,
+  required String resolvedPath,
+  required String appId,
+  required String cacheKey,
+}) async {
   final appData = Platform.environment['APPDATA'];
   if (appData == null || appData.isEmpty) return '';
 
@@ -48,13 +69,42 @@ Future<String> extractWindowsAppIcon({
     iconDir.createSync(recursive: true);
   }
 
+  final cachedHashedPath = '${iconDir.path}\\$cacheKey.png';
+  if (File(cachedHashedPath).existsSync()) {
+    return cachedHashedPath;
+  }
+
   final safeId = appId.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
-  final iconPath = '${iconDir.path}\\$safeId.png';
+  final legacyPath = '${iconDir.path}\\$safeId.png';
+  if (File(legacyPath).existsSync()) {
+    return legacyPath;
+  }
+
+  if (isAppxAppUserModelId(resolvedPath)) {
+    return _extractWindowsStoreAppIcon(
+      appUserModelId: resolvedPath,
+      outputPath: cachedHashedPath,
+    );
+  }
+  if (isUwpOrProtocol(resolvedPath)) {
+    return resolvedPath.contains(':')
+        ? ''
+        : _extractWindowsShellShortcutIcon(
+            appUserModelId: resolvedPath,
+            outputPath: cachedHashedPath,
+          );
+  }
+  if (!File(resolvedPath).existsSync()) {
+    return '';
+  }
 
   final result = await Process.run(
     'powershell',
     [
       '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
@@ -72,34 +122,27 @@ $icon.Dispose()
     ],
     environment: {
       'NEXUS_ICON_EXE_PATH': resolvedPath,
-      'NEXUS_ICON_OUTPUT_PATH': iconPath,
+      'NEXUS_ICON_OUTPUT_PATH': cachedHashedPath,
     },
   );
 
-  if (result.exitCode == 0 && File(iconPath).existsSync()) {
-    return iconPath;
+  if (result.exitCode == 0 && File(cachedHashedPath).existsSync()) {
+    return cachedHashedPath;
   }
   return '';
 }
 
 Future<String> _extractWindowsShellShortcutIcon({
   required String appUserModelId,
-  required String appId,
+  required String outputPath,
 }) async {
-  final appData = Platform.environment['APPDATA'];
-  if (appData == null || appData.isEmpty) return '';
-
-  final iconDir = Directory('$appData\\NexusDashboard\\icons');
-  if (!iconDir.existsSync()) {
-    iconDir.createSync(recursive: true);
-  }
-
-  final safeId = appId.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
-  final iconPath = '${iconDir.path}\\$safeId.png';
   final result = await Process.run(
     'powershell',
     [
       '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
@@ -143,35 +186,27 @@ exit 2
     ],
     environment: {
       'NEXUS_APP_AUMID': appUserModelId,
-      'NEXUS_ICON_OUTPUT_PATH': iconPath,
+      'NEXUS_ICON_OUTPUT_PATH': outputPath,
     },
   );
 
-  if (result.exitCode == 0 && File(iconPath).existsSync()) {
-    return iconPath;
+  if (result.exitCode == 0 && File(outputPath).existsSync()) {
+    return outputPath;
   }
   return '';
 }
 
 Future<String> _extractWindowsStoreAppIcon({
   required String appUserModelId,
-  required String appId,
+  required String outputPath,
 }) async {
-  final appData = Platform.environment['APPDATA'];
-  if (appData == null || appData.isEmpty) return '';
-
-  final iconDir = Directory('$appData\\NexusDashboard\\icons');
-  if (!iconDir.existsSync()) {
-    iconDir.createSync(recursive: true);
-  }
-
-  final safeId = appId.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
-  final iconPath = '${iconDir.path}\\$safeId.png';
-
   final result = await Process.run(
     'powershell',
     [
       '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
@@ -260,12 +295,12 @@ exit 6
     ],
     environment: {
       'NEXUS_APP_AUMID': appUserModelId,
-      'NEXUS_ICON_OUTPUT_PATH': iconPath,
+      'NEXUS_ICON_OUTPUT_PATH': outputPath,
     },
   );
 
-  if (result.exitCode == 0 && File(iconPath).existsSync()) {
-    return iconPath;
+  if (result.exitCode == 0 && File(outputPath).existsSync()) {
+    return outputPath;
   }
   return '';
 }

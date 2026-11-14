@@ -1,23 +1,68 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
 typedef WeatherHttpGet = Future<http.Response> Function(Uri uri);
 
 class WeatherProvider extends ChangeNotifier {
   final WeatherHttpGet _httpGet;
+  SharedPreferences? _prefs;
   WeatherData? _weatherData;
   bool _isLoading = false;
   bool _isDemoData = false;
+  bool _isStale = false;
+  DateTime? _lastUpdated;
   String _error = '';
 
-  WeatherProvider({WeatherHttpGet? httpGet}) : _httpGet = httpGet ?? http.get;
+  WeatherProvider({
+    WeatherHttpGet? httpGet,
+    SharedPreferences? prefs,
+  }) : _httpGet = httpGet ?? http.get,
+       _prefs = prefs {
+    _loadCache();
+  }
 
   WeatherData? get weatherData => _weatherData;
   bool get isLoading => _isLoading;
   bool get isDemoData => _isDemoData;
+  bool get isStale => _isStale;
+  DateTime? get lastUpdated => _lastUpdated;
   String get error => _error;
+
+  Future<void> _loadCache() async {
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+      final cachedJson = _prefs?.getString('weatherCache');
+      if (cachedJson != null && cachedJson.isNotEmpty) {
+        final map = jsonDecode(cachedJson) as Map<String, dynamic>;
+        _weatherData = WeatherData.fromJson(
+          map['data'] as Map<String, dynamic>,
+        );
+        _lastUpdated = map['updatedAt'] != null
+            ? DateTime.tryParse(map['updatedAt'])
+            : null;
+        _isStale = true;
+        _isDemoData = false;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveCache() async {
+    try {
+      if (_weatherData == null) return;
+      _prefs ??= await SharedPreferences.getInstance();
+      final cache = {
+        'data': _weatherData!.toJson(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+      await _prefs?.setString('weatherCache', jsonEncode(cache));
+      _lastUpdated = DateTime.now();
+      _isStale = false;
+    } catch (_) {}
+  }
 
   Future<void> fetchWeather({
     required String apiKey,
@@ -80,15 +125,27 @@ class WeatherProvider extends ChangeNotifier {
           forecast: forecast,
         );
         _isDemoData = false;
+        _isStale = false;
+        await _saveCache();
       } else {
-        _error = 'Could not fetch weather';
+        if (_weatherData != null) {
+          _isStale = true;
+          _error = 'Offline (cached data)';
+        } else {
+          _error = 'Could not fetch weather';
+          _weatherData = WeatherData.mock();
+          _isDemoData = true;
+        }
+      }
+    } catch (e) {
+      if (_weatherData != null) {
+        _isStale = true;
+        _error = 'Offline (cached data)';
+      } else {
+        _error = 'Network error';
         _weatherData = WeatherData.mock();
         _isDemoData = true;
       }
-    } catch (e) {
-      _error = 'Network error';
-      _weatherData = WeatherData.mock();
-      _isDemoData = true;
     }
 
     _isLoading = false;
@@ -150,15 +207,27 @@ class WeatherProvider extends ChangeNotifier {
           city: resolvedCity,
         );
         _isDemoData = false;
+        _isStale = false;
+        await _saveCache();
       } else {
-        _error = 'Could not fetch weather';
+        if (_weatherData != null) {
+          _isStale = true;
+          _error = 'Offline (cached data)';
+        } else {
+          _error = 'Could not fetch weather';
+          _weatherData = WeatherData.mock();
+          _isDemoData = true;
+        }
+      }
+    } catch (e) {
+      if (_weatherData != null) {
+        _isStale = true;
+        _error = 'Offline (cached data)';
+      } else {
+        _error = 'Network error';
         _weatherData = WeatherData.mock();
         _isDemoData = true;
       }
-    } catch (e) {
-      _error = 'Network error';
-      _weatherData = WeatherData.mock();
-      _isDemoData = true;
     }
 
     _isLoading = false;
