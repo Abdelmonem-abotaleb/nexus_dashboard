@@ -308,8 +308,19 @@ class _SettingsPanelState extends State<SettingsPanel> {
       min: .25,
       max: 1,
       divisions: 15,
+      liveUpdate: dashboard.desktopWidgetMode,
       onCommit: dashboard.setWindowOpacity,
     ),
+    if (dashboard.desktopWidgetMode)
+      _CommitSlider(
+        label: 'Widget card opacity',
+        value: dashboard.desktopWidgetOpacity,
+        min: 0,
+        max: 1,
+        divisions: 20,
+        liveUpdate: true,
+        onCommit: dashboard.setDesktopWidgetOpacity,
+      ),
     _CommitSlider(
       label: 'Background dim',
       value: dashboard.backgroundDim,
@@ -324,6 +335,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
       min: 0,
       max: 30,
       divisions: 30,
+      display: (value) => '${value.round()} px',
       onCommit: dashboard.setBlurStrength,
     ),
     _CommitSlider(

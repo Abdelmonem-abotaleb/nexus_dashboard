@@ -505,6 +505,53 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'blur strength displays px and window opacity applies in desktop widget mode',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'layoutSchemaVersion': 3,
+        'lowResourceMode': true,
+        'startupDelaySeconds': 30,
+        'desktopWidgetMode': true,
+        'desktopWidgetEnabledIds': ['clock'],
+        'blurStrength': 11.0,
+        'windowOpacity': 0.3,
+      });
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(420, 760);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final prefs = await SharedPreferences.getInstance();
+
+      await tester.pumpWidget(_dashboardTestApp(prefs));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      final opacityWidget = tester.widget<Opacity>(
+        find.byKey(const Key('desktop-widget-window-opacity')),
+      );
+      expect(opacityWidget.opacity, closeTo(0.3, 0.001));
+
+      // Open Settings via Ctrl+,
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.comma);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.comma);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+
+      expect(find.text('Settings'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Blur strength'),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('11 px'), findsOneWidget);
+      expect(find.text('1100%'), findsNothing);
+      expect(find.text('Widget card opacity'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 Widget _dashboardTestApp(

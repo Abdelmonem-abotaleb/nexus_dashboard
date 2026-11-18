@@ -135,8 +135,13 @@ class _DashboardScreenState extends State<DashboardScreen>
       focusNode: _focusNode,
       autofocus: true,
       onKeyEvent: (event) => _handleKeyEvent(event, dashboard),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
+      child: Opacity(
+        key: const Key('desktop-widget-window-opacity'),
+        opacity: dashboard.desktopWidgetMode
+            ? dashboard.windowOpacity.clamp(0.25, 1.0)
+            : 1.0,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
         body: Stack(
           children: [
             // Ã¢â€â‚¬Ã¢â€â‚¬ Background Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -240,6 +245,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -302,7 +308,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       dashboard.hideFromTaskbar,
       dashboard.borderlessEnabled,
       dashboard.protectWindowControls,
-      dashboard.windowOpacity,
+      dashboard.desktopWidgetMode ? 1.0 : dashboard.windowOpacity,
     ].join('|');
     if (_lastWindowSignature == signature) return;
     _lastWindowSignature = signature;
@@ -421,7 +427,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       dashboard.hideFromTaskbar,
       dashboard.borderlessEnabled,
       dashboard.protectWindowControls,
-      dashboard.windowOpacity,
+      dashboard.desktopWidgetMode ? 1.0 : dashboard.windowOpacity,
       dashboard.backgroundRotationMinutes,
       ...dashboard.validBackgroundImagePaths,
     ].join('|');
