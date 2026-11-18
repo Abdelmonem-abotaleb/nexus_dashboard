@@ -417,9 +417,10 @@ class _SettingsPanelState extends State<SettingsPanel> {
     _CommitSlider(
       label: 'Desktop widget opacity',
       value: dashboard.desktopWidgetOpacity,
-      min: .25,
+      min: 0,
       max: 1,
-      divisions: 15,
+      divisions: 20,
+      liveUpdate: true,
       onCommit: dashboard.setDesktopWidgetOpacity,
     ),
     const SizedBox(height: 16),
@@ -881,6 +882,7 @@ class _CommitSlider extends StatefulWidget {
   final double max;
   final int? divisions;
   final String Function(double)? display;
+  final bool liveUpdate;
   final ValueChanged<double> onCommit;
   const _CommitSlider({
     required this.label,
@@ -889,6 +891,7 @@ class _CommitSlider extends StatefulWidget {
     required this.max,
     this.divisions,
     this.display,
+    this.liveUpdate = false,
     required this.onCommit,
   });
 
@@ -928,7 +931,10 @@ class _CommitSliderState extends State<_CommitSlider> {
         max: widget.max,
         divisions: widget.divisions,
         onChangeStart: (_) => _dragging = true,
-        onChanged: (value) => setState(() => _value = value),
+        onChanged: (value) {
+          setState(() => _value = value);
+          if (widget.liveUpdate) widget.onCommit(value);
+        },
         onChangeEnd: (value) {
           _dragging = false;
           widget.onCommit(value);

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -12,6 +13,7 @@ import '../models/models.dart';
 import '../services/app_icon_service.dart';
 import '../services/dashboard_grid_service.dart';
 import '../services/notification_service.dart';
+import '../services/window_transparency_service.dart';
 
 enum ThemeModePreference {
   system,
@@ -101,7 +103,7 @@ class DashboardProvider extends ChangeNotifier {
   bool _desktopWidgetAlwaysOnTop = false;
   bool _desktopWidgetHideFromTaskbar = true;
   bool _desktopWidgetLockPosition = false;
-  double _desktopWidgetOpacity = 0.94;
+  double _desktopWidgetOpacity = 0.0;
   Rect? _dashboardWindowBounds;
   Rect? _desktopWidgetWindowBounds;
 
@@ -239,6 +241,8 @@ class DashboardProvider extends ChangeNotifier {
     _accentColor = _prefs.getString('accentColor') ?? '#00D4FF';
     _followSystemAccent = _prefs.getBool('followSystemAccent') ?? true;
     _backdropEffect = _prefs.getString('backdropEffect') ?? 'mica';
+    _themeModePreference = _loadThemeModePreference();
+    _loadDesktopWidgetPreferences();
     _applyBackdropEffect();
     if (Platform.isWindows) {
       SystemTheme.onChange.listen((_) {
@@ -249,7 +253,6 @@ class DashboardProvider extends ChangeNotifier {
     }
     _showSeconds = _prefs.getBool('showSeconds') ?? true;
     _use24Hour = _prefs.getBool('use24Hour') ?? true;
-    _themeModePreference = _loadThemeModePreference();
     _weatherApiKey = _prefs.getString('weatherApiKey') ?? '';
     _weatherCity = _prefs.getString('weatherCity') ?? '';
     _takeoverMode = _prefs.getBool('takeoverMode') ?? false;
@@ -268,7 +271,6 @@ class DashboardProvider extends ChangeNotifier {
     _weatherMetricUnits = _prefs.getBool('weatherMetricUnits') ?? true;
     _weatherRefreshMinutes = _prefs.getInt('weatherRefreshMinutes') ?? 15;
     _lowResourceMode = _prefs.getBool('lowResourceMode') ?? false;
-    _loadDesktopWidgetPreferences();
 
     // Add demo data if first launch
     if (_apps.isEmpty) _loadDemoApps();
@@ -786,17 +788,32 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   void _applyBackdropEffect() {
+    unawaited(applyBackdropEffect());
+  }
+
+  Future<void> applyBackdropEffect() async {
     if (!Platform.isWindows) return;
     try {
+      if (_desktopWidgetMode) {
+        await Window.setEffect(
+          effect: WindowEffect.transparent,
+          color: Colors.transparent,
+        );
+        WindowTransparencyService.applyTransparentWidgetBackdrop();
+        return;
+      }
+
+      WindowTransparencyService.restoreStandardBackdrop();
       final effect = switch (_backdropEffect) {
         'acrylic' => WindowEffect.acrylic,
         'solid' => WindowEffect.solid,
         'tabbed' => WindowEffect.tabbed,
         _ => WindowEffect.mica,
       };
-      Window.setEffect(
+      await Window.setEffect(
         effect: effect,
-        dark: _themeModePreference == ThemeModePreference.dark ||
+        dark:
+            _themeModePreference == ThemeModePreference.dark ||
             (_themeModePreference == ThemeModePreference.system &&
                 (PlatformDispatcher.instance.platformBrightness ==
                     Brightness.dark)),
@@ -1013,8 +1030,8 @@ class DashboardProvider extends ChangeNotifier {
         _prefs.getBool('desktopWidgetHideFromTaskbar') ?? true;
     _desktopWidgetLockPosition =
         _prefs.getBool('desktopWidgetLockPosition') ?? false;
-    _desktopWidgetOpacity = (_prefs.getDouble('desktopWidgetOpacity') ?? 0.94)
-        .clamp(0.25, 1.0);
+    _desktopWidgetOpacity = (_prefs.getDouble('desktopWidgetOpacity') ?? 0.0)
+        .clamp(0.0, 1.0);
     _dashboardWindowBounds = _readWindowBounds('dashboardWin');
     _desktopWidgetWindowBounds = _readWindowBounds('widgetWin');
   }
@@ -1042,6 +1059,7 @@ class DashboardProvider extends ChangeNotifier {
     _isEditMode = false;
     _bumpLayoutRevision();
     await _prefs.setBool('desktopWidgetMode', value);
+    _applyBackdropEffect();
     notifyListeners();
   }
 
@@ -1095,7 +1113,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> setDesktopWidgetOpacity(double value) async {
-    _desktopWidgetOpacity = value.clamp(0.25, 1.0);
+    _desktopWidgetOpacity = value.clamp(0.0, 1.0);
     await _prefs.setDouble('desktopWidgetOpacity', _desktopWidgetOpacity);
     notifyListeners();
   }

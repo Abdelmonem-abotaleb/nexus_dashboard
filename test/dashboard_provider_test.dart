@@ -371,4 +371,21 @@ void main() {
       const Rect.fromLTWH(1050, 120, 380, 640),
     );
   });
+
+  test('defaults desktop widget opacity to 0.0 and clamps 0.0 to 1.0', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final provider = DashboardProvider(prefs);
+
+    expect(provider.desktopWidgetOpacity, 0.0);
+
+    await provider.setDesktopWidgetOpacity(0.5);
+    expect(provider.desktopWidgetOpacity, 0.5);
+    expect(prefs.getDouble('desktopWidgetOpacity'), 0.5);
+
+    await provider.setDesktopWidgetOpacity(-0.25);
+    expect(provider.desktopWidgetOpacity, 0.0);
+
+    await provider.setDesktopWidgetOpacity(1.4);
+    expect(provider.desktopWidgetOpacity, 1.0);
+  });
 }

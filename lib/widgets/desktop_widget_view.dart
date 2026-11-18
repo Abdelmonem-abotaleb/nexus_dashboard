@@ -24,86 +24,132 @@ class DesktopWidgetView extends StatefulWidget {
 class _DesktopWidgetViewState extends State<DesktopWidgetView> {
   bool _hovered = false;
   bool _pickerOpen = false;
+  bool _opacityOpen = false;
 
   @override
   Widget build(BuildContext context) {
     final dashboard = context.watch<DashboardProvider>();
     final visibleIds = dashboard.visibleDesktopWidgetOrder;
-    final controlsVisible = _hovered || _pickerOpen || visibleIds.isEmpty;
+    final controlsVisible =
+        _hovered || _pickerOpen || _opacityOpen || visibleIds.isEmpty;
     final theme = Theme.of(context);
+    final surfaceOpacity = dashboard.desktopWidgetOpacity.clamp(0.0, 1.0);
+    final existingVisualTheme = theme.extension<NexusVisualTheme>();
+    final widgetTheme = theme.copyWith(
+      extensions: [
+        ...theme.extensions.values.where((ext) => ext is! NexusVisualTheme),
+        NexusVisualTheme(
+          glassIntensity: existingVisualTheme?.glassIntensity ?? 1.0,
+          widgetSurfaceOpacity: surfaceOpacity,
+        ),
+      ],
+    );
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: visibleIds.isEmpty
-                  ? _EmptyWidgetState(
-                      onChooseWidgets: () => setState(() => _pickerOpen = true),
-                      onSwitchToDashboard: () =>
-                          dashboard.setDesktopWidgetMode(false),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(12, 52, 12, 14),
-                      physics: const BouncingScrollPhysics(),
-                      itemCount: visibleIds.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final id = visibleIds[index];
-                        final child = widget.buildWidget(id);
-                        if (child == null) return const SizedBox.shrink();
-                        return KeyedSubtree(
-                          key: ValueKey('desktop-widget-card-$id'),
-                          child: _wrapCardForCompactStack(id, child),
-                        );
-                      },
+      child: Theme(
+        data: widgetTheme,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            color: surfaceOpacity <= 0.001
+                ? Colors.transparent
+                : theme.colorScheme.surface.withValues(
+                    alpha: 0.14 * surfaceOpacity,
+                  ),
+            border: surfaceOpacity <= 0.001
+                ? Border.all(color: Colors.transparent, width: 0)
+                : Border.all(
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.65 * surfaceOpacity,
                     ),
-            ),
+                  ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: visibleIds.isEmpty
+                    ? _EmptyWidgetState(
+                        onChooseWidgets: () =>
+                            setState(() => _pickerOpen = true),
+                        onSwitchToDashboard: () =>
+                            dashboard.setDesktopWidgetMode(false),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(12, 52, 12, 14),
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: visibleIds.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final id = visibleIds[index];
+                          final child = widget.buildWidget(id);
+                          if (child == null) return const SizedBox.shrink();
+                          return KeyedSubtree(
+                            key: ValueKey('desktop-widget-card-$id'),
+                            child: _wrapCardForCompactStack(id, child),
+                          );
+                        },
+                      ),
+              ),
 
-            // Hover-only mini control bar
-            Positioned(
-              top: 8,
-              left: 10,
-              right: 10,
-              child: IgnorePointer(
-                ignoring: !controlsVisible,
-                child: AnimatedOpacity(
-                  opacity: controlsVisible ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 160),
-                  curve: Curves.easeOut,
-                  child: _MiniControlBar(
-                    dashboard: dashboard,
-                    pickerOpen: _pickerOpen,
-                    onTogglePicker: () =>
-                        setState(() => _pickerOpen = !_pickerOpen),
-                    onOpenSettings: widget.onOpenSettings,
+              // Hover-only mini control bar
+              Positioned(
+                top: 8,
+                left: 10,
+                right: 10,
+                child: IgnorePointer(
+                  ignoring: !controlsVisible,
+                  child: AnimatedOpacity(
+                    opacity: controlsVisible ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
+                    child: _MiniControlBar(
+                      dashboard: dashboard,
+                      pickerOpen: _pickerOpen,
+                      opacityOpen: _opacityOpen,
+                      onTogglePicker: () => setState(() {
+                        _pickerOpen = !_pickerOpen;
+                        if (_pickerOpen) _opacityOpen = false;
+                      }),
+                      onToggleOpacity: () => setState(() {
+                        _opacityOpen = !_opacityOpen;
+                        if (_opacityOpen) _pickerOpen = false;
+                      }),
+                      onOpenSettings: widget.onOpenSettings,
+                    ),
                   ),
                 ),
               ),
-            ),
 
-            // Inline widget picker & reorder drawer
-            if (_pickerOpen)
-              Positioned(
-                top: 52,
-                left: 12,
-                right: 12,
-                bottom: 12,
-                child: _WidgetPickerPanel(
-                  dashboard: dashboard,
-                  onClose: () => setState(() => _pickerOpen = false),
+              // Inline transparency degree bar
+              if (_opacityOpen && !_pickerOpen)
+                Positioned(
+                  top: 48,
+                  left: 10,
+                  right: 10,
+                  child: _OpacityControlBar(
+                    opacity: surfaceOpacity,
+                    onChanged: dashboard.setDesktopWidgetOpacity,
+                    onClose: () => setState(() => _opacityOpen = false),
+                  ),
                 ),
-              ),
-          ],
+
+              // Inline widget picker & reorder drawer
+              if (_pickerOpen)
+                Positioned(
+                  top: 52,
+                  left: 12,
+                  right: 12,
+                  bottom: 12,
+                  child: _WidgetPickerPanel(
+                    dashboard: dashboard,
+                    onClose: () => setState(() => _pickerOpen = false),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -125,13 +171,17 @@ class _DesktopWidgetViewState extends State<DesktopWidgetView> {
 class _MiniControlBar extends StatelessWidget {
   final DashboardProvider dashboard;
   final bool pickerOpen;
+  final bool opacityOpen;
   final VoidCallback onTogglePicker;
+  final VoidCallback onToggleOpacity;
   final VoidCallback onOpenSettings;
 
   const _MiniControlBar({
     required this.dashboard,
     required this.pickerOpen,
+    required this.opacityOpen,
     required this.onTogglePicker,
+    required this.onToggleOpacity,
     required this.onOpenSettings,
   });
 
@@ -196,6 +246,13 @@ class _MiniControlBar extends StatelessWidget {
                 onTap: onTogglePicker,
               ),
               _MiniIconButton(
+                key: const Key('desktop-widget-opacity-button'),
+                icon: Icons.opacity_rounded,
+                tooltip: 'Adjust transparency',
+                active: opacityOpen,
+                onTap: onToggleOpacity,
+              ),
+              _MiniIconButton(
                 key: const Key('desktop-widget-pin-button'),
                 icon: dashboard.desktopWidgetAlwaysOnTop
                     ? Icons.push_pin_rounded
@@ -226,6 +283,90 @@ class _MiniControlBar extends StatelessWidget {
                 icon: Icons.open_in_full_rounded,
                 tooltip: 'Switch to Full Dashboard',
                 onTap: () => dashboard.setDesktopWidgetMode(false),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OpacityControlBar extends StatelessWidget {
+  final double opacity;
+  final ValueChanged<double> onChanged;
+  final VoidCallback onClose;
+
+  const _OpacityControlBar({
+    required this.opacity,
+    required this.onChanged,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = AppTheme.accent(context);
+    final percent = (opacity * 100).round();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: accent.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.opacity_rounded, size: 15, color: accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 6,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 12,
+                    ),
+                  ),
+                  child: Slider(
+                    key: const Key('desktop-widget-opacity-slider'),
+                    value: opacity.clamp(0.0, 1.0),
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 20,
+                    onChanged: onChanged,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 38,
+                child: Text(
+                  '$percent%',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Close transparency slider',
+                onPressed: onClose,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                padding: EdgeInsets.zero,
+                iconSize: 15,
+                icon: const Icon(Icons.close_rounded),
               ),
             ],
           ),

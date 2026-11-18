@@ -124,8 +124,56 @@ class AppTheme {
   }) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
-    final intensity =
-        theme.extension<NexusVisualTheme>()?.glassIntensity ?? 1.0;
+    final visualTheme = theme.extension<NexusVisualTheme>();
+    final intensity = visualTheme?.glassIntensity ?? 1.0;
+    final widgetOpacity = visualTheme?.widgetSurfaceOpacity;
+
+    if (widgetOpacity != null) {
+      final op = widgetOpacity.clamp(0.0, 1.0);
+      if (op <= 0.001) {
+        return BoxDecoration(
+          borderRadius: BorderRadius.circular(borderRadius),
+          color: Colors.transparent,
+          border: Border.all(color: Colors.transparent, width: 0),
+        );
+      }
+      final effectiveBorder = borderColor ?? theme.colorScheme.outlineVariant;
+      final colors = gradientColors != null
+          ? gradientColors
+                .map((c) => c.withValues(alpha: (c.a * op).clamp(0.0, 1.0)))
+                .toList()
+          : (dark
+                ? [
+                    const Color(0xFF18202A).withValues(
+                      alpha: (0.92 * op * intensity).clamp(0.0, 1.0),
+                    ),
+                    const Color(0xFF121820).withValues(
+                      alpha: (0.80 * op * intensity).clamp(0.0, 1.0),
+                    ),
+                  ]
+                : [
+                    Colors.white.withValues(
+                      alpha: (0.92 * op * intensity).clamp(0.0, 1.0),
+                    ),
+                    const Color(0xFFE9EDF2).withValues(
+                      alpha: (0.80 * op * intensity).clamp(0.0, 1.0),
+                    ),
+                  ]);
+      return BoxDecoration(
+        borderRadius: BorderRadius.circular(borderRadius),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+        ),
+        border: Border.all(
+          color: effectiveBorder.withValues(
+            alpha: (effectiveBorder.a * op).clamp(0.0, 1.0),
+          ),
+        ),
+      );
+    }
+
     return BoxDecoration(
       borderRadius: BorderRadius.circular(borderRadius),
       gradient: LinearGradient(
@@ -157,18 +205,38 @@ class AppTheme {
 @immutable
 class NexusVisualTheme extends ThemeExtension<NexusVisualTheme> {
   final double glassIntensity;
-  const NexusVisualTheme({required this.glassIntensity});
+  final double? widgetSurfaceOpacity;
+
+  const NexusVisualTheme({
+    required this.glassIntensity,
+    this.widgetSurfaceOpacity,
+  });
 
   @override
-  NexusVisualTheme copyWith({double? glassIntensity}) =>
-      NexusVisualTheme(glassIntensity: glassIntensity ?? this.glassIntensity);
+  NexusVisualTheme copyWith({
+    double? glassIntensity,
+    double? widgetSurfaceOpacity,
+  }) => NexusVisualTheme(
+    glassIntensity: glassIntensity ?? this.glassIntensity,
+    widgetSurfaceOpacity: widgetSurfaceOpacity ?? this.widgetSurfaceOpacity,
+  );
 
   @override
   NexusVisualTheme lerp(covariant NexusVisualTheme? other, double t) {
     if (other == null) return this;
+    final lerpedWidgetOpacity = switch ((
+      widgetSurfaceOpacity,
+      other.widgetSurfaceOpacity,
+    )) {
+      (final a?, final b?) => a + (b - a) * t,
+      (final a?, null) => a,
+      (null, final b?) => b,
+      (null, null) => null,
+    };
     return NexusVisualTheme(
       glassIntensity:
           glassIntensity + (other.glassIntensity - glassIntensity) * t,
+      widgetSurfaceOpacity: lerpedWidgetOpacity,
     );
   }
 }

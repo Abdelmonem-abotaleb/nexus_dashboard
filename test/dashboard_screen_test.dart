@@ -20,6 +20,7 @@ import 'package:nexus_dashboard/screens/dashboard_screen.dart';
 import 'package:nexus_dashboard/services/startup_service.dart';
 import 'package:nexus_dashboard/theme/app_theme.dart';
 import 'package:nexus_dashboard/widgets/desktop_widget_view.dart';
+import 'package:nexus_dashboard/widgets/particle_background.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -428,6 +429,82 @@ void main() {
     expect(find.byType(DesktopWidgetView), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'desktop widget mode hides dashboard background, defaults to full transparency, and adjusts card opacity inline',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'layoutSchemaVersion': 3,
+        'lowResourceMode': false,
+        'startupDelaySeconds': 30,
+        'desktopWidgetMode': true,
+        'desktopWidgetEnabledIds': ['clock'],
+      });
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(380, 640);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final prefs = await SharedPreferences.getInstance();
+
+      await tester.pumpWidget(_dashboardTestApp(prefs));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final context = tester.element(find.byType(DashboardScreen));
+      final dashboard = Provider.of<DashboardProvider>(context, listen: false);
+
+      expect(dashboard.desktopWidgetOpacity, 0.0);
+      expect(find.byKey(const ValueKey('default-background')), findsNothing);
+      expect(find.byType(ParticleBackground), findsNothing);
+
+      Container clockCardContainer() => tester.widget<Container>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('desktop-widget-card-clock')),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+
+      final initialDecoration = clockCardContainer().decoration! as BoxDecoration;
+      expect(initialDecoration.color, Colors.transparent);
+      expect(initialDecoration.gradient, isNull);
+      expect((initialDecoration.border! as Border).top.color, Colors.transparent);
+
+      // Hover to show mini control bar and open inline opacity slider
+      final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(tester.getCenter(find.byType(DesktopWidgetView)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(
+        find.byKey(const Key('desktop-widget-opacity-button')),
+      );
+      await tester.pump();
+
+      final sliderFinder = find.byKey(
+        const Key('desktop-widget-opacity-slider'),
+      );
+      expect(sliderFinder, findsOneWidget);
+
+      // Drag slider to the center (~50%)
+      await tester.tap(sliderFinder);
+      await tester.pump();
+
+      expect(dashboard.desktopWidgetOpacity, closeTo(0.5, 0.1));
+      final updatedDecoration = clockCardContainer().decoration! as BoxDecoration;
+      expect(updatedDecoration.gradient, isNotNull);
+      expect(
+        updatedDecoration.gradient!.colors.first.a,
+        greaterThan(0.0),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 Widget _dashboardTestApp(

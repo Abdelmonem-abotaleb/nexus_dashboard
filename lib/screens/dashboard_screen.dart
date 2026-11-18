@@ -140,15 +140,16 @@ class _DashboardScreenState extends State<DashboardScreen>
         body: Stack(
           children: [
             // Ã¢â€â‚¬Ã¢â€â‚¬ Background Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-            _buildBackground(dashboard),
+            if (!dashboard.desktopWidgetMode) _buildBackground(dashboard),
 
             // Ã¢â€â‚¬Ã¢â€â‚¬ Particle effect Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-            if (shouldRenderParticles(
-              lowResourceMode: dashboard.lowResourceMode,
-              hasBackgroundImage: _activeBackgroundImagePath(
-                dashboard,
-              ).isNotEmpty,
-            ))
+            if (!dashboard.desktopWidgetMode &&
+                shouldRenderParticles(
+                  lowResourceMode: dashboard.lowResourceMode,
+                  hasBackgroundImage: _activeBackgroundImagePath(
+                    dashboard,
+                  ).isNotEmpty,
+                ))
               ParticleBackground(active: _visualEffectsActive),
 
             // Ã¢â€â‚¬Ã¢â€â‚¬ Main content Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -295,7 +296,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       dashboard.desktopWidgetAlwaysOnTop,
       dashboard.desktopWidgetHideFromTaskbar,
       dashboard.desktopWidgetLockPosition,
-      dashboard.desktopWidgetOpacity,
       dashboard.takeoverMode,
       dashboard.fullscreenEnabled,
       dashboard.alwaysOnTop,
@@ -356,7 +356,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
 
     if (dashboard.desktopWidgetMode) {
-      await windowManager.setOpacity(dashboard.desktopWidgetOpacity);
+      await windowManager.setBackgroundColor(Colors.transparent);
+      await windowManager.setOpacity(1.0);
       await windowManager.setAlwaysOnTop(dashboard.desktopWidgetAlwaysOnTop);
       await windowManager.setSkipTaskbar(dashboard.desktopWidgetHideFromTaskbar);
       await windowManager.setFullScreen(false);
@@ -365,6 +366,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       await windowManager.setMinimizable(true);
       await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
       await windowManager.setResizable(!dashboard.desktopWidgetLockPosition);
+      unawaited(dashboard.applyBackdropEffect());
       await windowManager.show();
       return;
     }
@@ -387,6 +389,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     await windowManager.setTitleBarStyle(
       dashboard.borderlessEnabled ? TitleBarStyle.hidden : TitleBarStyle.normal,
     );
+    unawaited(dashboard.applyBackdropEffect());
     if (!fullscreenTakeover) {
       await windowManager.show();
     }
@@ -412,7 +415,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       dashboard.desktopWidgetAlwaysOnTop,
       dashboard.desktopWidgetHideFromTaskbar,
       dashboard.desktopWidgetLockPosition,
-      dashboard.desktopWidgetOpacity,
       dashboard.takeoverMode,
       dashboard.fullscreenEnabled,
       dashboard.alwaysOnTop,
